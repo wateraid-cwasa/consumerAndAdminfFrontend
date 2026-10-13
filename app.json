@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "CWASA Customer Platform",
+    "slug": "cwasa-customer-platform",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#0964c7"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take photos to attach evidence to your CWASA service request.",
+        "NSLocationWhenInUseUsageDescription": "Use your location to identify the service address for your request."
+      }
+    },
+    "android": {
+      "permissions": [
+        "CAMERA",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-location"
+    ]
+  }
+}
