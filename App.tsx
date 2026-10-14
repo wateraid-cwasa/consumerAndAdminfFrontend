@@ -21,6 +21,17 @@ import GuestServices, { GuestComplaint } from './GuestServices';
 import { GuestSection, translateGuest } from './guestTranslations';
 import MeterAdmin from './MeterAdmin';
 import { getLatestApprovedReading, MeterReading, subscribeToMeterReadings } from './meterReadings';
+import {
+  requestCustomerOtp,
+  verifyCustomerOtp,
+  getStoredCustomerSession,
+  getCustomerBills,
+  signOutCustomer,
+  ApiRequestError,
+  ApiConnectionError,
+  type CustomerSession,
+  type BillHistoryEntry,
+} from './consumerApi';
 
 type Screen =
   | 'welcome'
@@ -134,6 +145,12 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(
+    () => (Platform.OS === 'web' ? getStoredCustomerSession() : null),
+  );
+  const [customerBills, setCustomerBills] = useState<BillHistoryEntry[]>([]);
+  const [authBusy, setAuthBusy] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState(paymentMethods[0]);
   const [paymentPhone, setPaymentPhone] = useState('01712 345 678');
   const [payments, setPayments] = useState<Payment[]>([
@@ -175,13 +192,17 @@ export default function App() {
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const t = useCallback((key: TranslationKey) => translate(language, key), [language]);
-  const font = language === 'bn' ? 'Shurjo' : 'Shurjo';
+  const font = 'Shurjo';
   const fontBold = language === 'bn' ? 'Shurjo-Bold' : 'RBNylo-Bold';
   const unreadCount = useMemo(() => notifications.filter((item) => !item.read).length, [notifications]);
   const meterConsumption = latestApprovedReading
     ? Math.max(0, latestApprovedReading.currentReading - latestApprovedReading.previousReading)
     : 1000;
-  const currentBillAmount = Math.max(50, Math.round(meterConsumption * 1.2 + 50));
+  const realCurrentBill = customerBills[0]?.billTotal != null ? Number(customerBills[0].billTotal) : null;
+  const currentBillAmount = realCurrentBill !== null && Number.isFinite(realCurrentBill)
+    ? Math.round(realCurrentBill)
+    : Math.max(50, Math.round(meterConsumption * 1.2 + 50));
+  const displayAccountNo = customerSession?.accountNo ?? 'CW-2026-0488';
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -189,6 +210,21 @@ export default function App() {
       setLatestApprovedReading(getLatestApprovedReading('CW-2026-0488'));
     });
   }, []);
+
+  const loadCustomerBills = useCallback(async () => {
+    try {
+      const bills = await getCustomerBills();
+      setCustomerBills(bills);
+    } catch {
+      // Keep showing the demo figures if the customer API is unreachable.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (customerSession) {
+      loadCustomerBills();
+    }
+  }, [customerSession, loadCustomerBills]);
 
   const showNotice = (message: string) => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
@@ -208,23 +244,60 @@ export default function App() {
     setScreen('public-services');
   };
 
-  const requestCode = () => {
-    if (!/^01\d{9}$/.test(phone.replace(/\D/g, ''))) {
-      showNotice(language === 'bn' ? 'সঠিক ১১ সংখ্যার মোবাইল নম্বর লিখুন।' : 'Enter a valid 11-digit Bangladesh mobile number.');
+  const requestCode = async () => {
+    if (!accountNumber.trim()) {
+      showNotice('Enter your CWASA account number.');
       return;
     }
-    setScreen('verify');
-    showNotice(language === 'bn' ? 'ডেমো মোড: যেকোনো ৬ সংখ্যার কোড লিখুন।' : 'Demo sign-in: enter any 6-digit code.');
+    if (!/^01\d{9}$/.test(phone.replace(/\D/g, ''))) {
+      showNotice('Enter a valid 11-digit Bangladesh mobile number.');
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const result = await requestCustomerOtp(accountNumber.trim(), phone.replace(/\D/g, ''));
+      setScreen('verify');
+      showNotice(
+        result.devOtp
+          ? `Dev mode: your code is ${result.devOtp} (no SMS gateway configured yet).`
+          : 'A verification code has been sent.',
+      );
+    } catch (error) {
+      if (error instanceof ApiConnectionError) {
+        showNotice('Could not reach the CWASA server.');
+      } else if (error instanceof ApiRequestError && error.status === 404) {
+        showNotice('That account number and mobile number do not match.');
+      } else {
+        showNotice('Could not send a code. Please try again.');
+      }
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
-  const verifyCode = () => {
+  const verifyCode = async () => {
     if (!/^\d{6}$/.test(otp)) {
-      showNotice(language === 'bn' ? '৬ সংখ্যার যাচাইকরণ কোড লিখুন।' : 'Enter the 6-digit verification code.');
+      showNotice('Enter the 6-digit verification code.');
       return;
     }
-    setIsGuest(false);
-    setScreen('home');
-    showNotice(t('welcomeBack'));
+    setAuthBusy(true);
+    try {
+      const session = await verifyCustomerOtp(accountNumber.trim(), otp);
+      setCustomerSession(session);
+      setIsGuest(false);
+      setScreen('home');
+      showNotice(t('welcomeBack'));
+    } catch (error) {
+      if (error instanceof ApiConnectionError) {
+        showNotice('Could not reach the CWASA server.');
+      } else if (error instanceof ApiRequestError && error.status === 401) {
+        showNotice('That code is incorrect or has expired.');
+      } else {
+        showNotice('Could not verify the code. Please try again.');
+      }
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const completePayment = () => {
@@ -508,14 +581,9 @@ export default function App() {
               <TextLabel bold style={styles.welcomeTitle}>Chattogram WASA</TextLabel>
               <TextLabel style={styles.welcomeSub}>{t('platform')}</TextLabel>
             </View>
-            <View style={styles.partnerBar}>
-              <TextLabel style={styles.partnerCaption}>In partnership with</TextLabel>
-              <Image source={require('./assets/wateraid-logo.png')} style={styles.partnerLogo} resizeMode="contain" />
-            </View>
             <View style={styles.welcomeActions}>
               <ActionButton title={t('continueWithMobile')} onPress={beginSignIn} fontFamily={font} />
               <ActionButton title={t('exploreGuest')} onPress={enterGuestPortal} secondary fontFamily={font} />
-              <TextLabel style={styles.legalText}>Secure, convenient water services for every customer</TextLabel>
             </View>
           </View>
         );
@@ -524,8 +592,9 @@ export default function App() {
           <View style={styles.formScreen}>
             <Heading title={t('continueWithMobile')} subtitle="Sign in to manage your CWASA services." />
             <Card>
+              <Field label="Account number" value={accountNumber} onChangeText={setAccountNumber} placeholder="CW-2026-0488" />
               <Field label={t('phoneNumber')} value={phone} onChangeText={setPhone} placeholder="01XXXXXXXXX" keyboardType="phone-pad" />
-              <ActionButton title={t('sendCode')} onPress={requestCode} fontFamily={font} />
+              <ActionButton title={authBusy ? '...' : t('sendCode')} onPress={requestCode} fontFamily={font} />
             </Card>
             <LinkAction title={t('exploreGuest')} onPress={enterGuestPortal} />
             <ActionButton title={t('back')} onPress={() => setScreen('welcome')} secondary fontFamily={font} />
@@ -538,7 +607,7 @@ export default function App() {
             <Card>
               <Field label={t('verification')} value={otp} onChangeText={(value) => setOtp(value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" keyboardType="numeric" />
               <TextLabel style={styles.helperText}>Enter the 6-digit code to continue.</TextLabel>
-              <ActionButton title={t('verify')} onPress={verifyCode} fontFamily={font} />
+              <ActionButton title={authBusy ? '...' : t('verify')} onPress={verifyCode} fontFamily={font} />
             </Card>
             <Pressable onPress={requestCode}><TextLabel style={styles.linkText}>Resend code</TextLabel></Pressable>
           </View>
@@ -553,7 +622,7 @@ export default function App() {
                 <TextLabel bold style={styles.heroAmount}>{currentBillPaid ? '৳ 0' : `৳ ${currentBillAmount.toLocaleString()}`}</TextLabel>
                 <TextLabel style={styles.heroDue}>{currentBillPaid ? 'Paid in full' : `Due 15 May 2026 · ${t('dueIn')}`}</TextLabel>
                 <View style={styles.heroBottom}>
-                  <TextLabel style={styles.heroAccount}>Account CW-2026-0488</TextLabel>
+                  <TextLabel style={styles.heroAccount}>Account {displayAccountNo}</TextLabel>
                   <ActionButton title={currentBillPaid ? t('transactionHistory') : t('payNow')} onPress={() => { if (currentBillPaid) setScreen('history'); else setScreen('bill'); }} fontFamily={font} compact />
                 </View>
               </View>
@@ -616,7 +685,7 @@ export default function App() {
           </View>
         ) : (
           <View>
-            <Heading title={t('billDetails')} subtitle="Chattogram WASA · Account CW-2026-0488" />
+            <Heading title={t('billDetails')} subtitle={`Chattogram WASA · Account ${displayAccountNo}`} />
             <View style={styles.billTabs}>
               <Pressable onPress={() => setBillFilter('due')} style={[styles.billTab, billFilter === 'due' && styles.billTabActive]}><TextLabel style={[styles.billTabText, billFilter === 'due' && styles.billTabTextActive]}>{t('dueBills')}</TextLabel></Pressable>
               <Pressable onPress={() => setBillFilter('paid')} style={[styles.billTab, billFilter === 'paid' && styles.billTabActive]}><TextLabel style={[styles.billTabText, billFilter === 'paid' && styles.billTabTextActive]}>{t('paidBills')}</TextLabel></Pressable>
@@ -630,34 +699,34 @@ export default function App() {
               <View><Card><TextLabel bold>{language === 'bn' ? 'কোনো বকেয়া বিল নেই' : 'No bills due'}</TextLabel><TextLabel style={styles.helperText}>{language === 'bn' ? 'বর্তমান বিল সম্পূর্ণ পরিশোধিত।' : 'Your current bill is paid in full.'}</TextLabel><ActionButton title={t('paidBills')} onPress={() => setBillFilter('paid')} secondary fontFamily={font} /></Card></View>
             ) : (
               <>
-            <Card>
-              <View style={styles.rowBetween}><TextLabel bold>MAY 2026</TextLabel><TextLabel style={styles.statusPill}>{t('pending')}</TextLabel></View>
-              <TextLabel style={styles.helperText}>Account CW-2026-0488 · Meter {latestApprovedReading?.meterNumber ?? '443920'}</TextLabel>
-              <View style={styles.amountLine}><TextLabel style={styles.billAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel><TextLabel style={styles.helperText}>Due 15 May 2026</TextLabel></View>
-              {latestApprovedReading ? <TextLabel style={styles.helperText}>{t('latestMeterReading')}: {latestApprovedReading.previousReading.toLocaleString()} → {latestApprovedReading.currentReading.toLocaleString()} m³ ({meterConsumption.toLocaleString()} m³)</TextLabel> : null}
-              <View style={styles.separator} />
-              <View style={styles.rowBetween}><TextLabel>{t('previousBalance')}</TextLabel><TextLabel>৳0</TextLabel></View>
-              <View style={styles.rowBetween}><TextLabel>{t('currentCharges')}</TextLabel><TextLabel>৳{Math.max(0, currentBillAmount - 50).toLocaleString()}</TextLabel></View>
-              <View style={styles.rowBetween}><TextLabel>{t('adjustment')}</TextLabel><TextLabel>৳0</TextLabel></View>
-              <View style={styles.rowBetween}><TextLabel>{t('serviceCharge')}</TextLabel><TextLabel>৳50</TextLabel></View>
-              <View style={styles.separator} />
-              <View style={styles.rowBetween}><TextLabel bold>{t('totalPayable')}</TextLabel><TextLabel bold style={styles.totalValue}>৳{currentBillAmount.toLocaleString()}</TextLabel></View>
-            </Card>
-            <Card>
-              <SectionTitle title={t('paymentMethod')} />
-              <View style={styles.paymentMethodGrid}>
-                {paymentMethods.map((method) => (
-                  <Pressable key={method} onPress={() => setPaymentMethod(method)} style={[styles.paymentOption, paymentMethod === method && styles.paymentOptionSelected]}>
-                    <View style={[styles.radio, paymentMethod === method && styles.radioSelected]} />
-                    <TextLabel>{method}</TextLabel>
-                  </Pressable>
-                ))}
-              </View>
-              <Field label={t('paymentNumber')} value={paymentPhone} onChangeText={setPaymentPhone} keyboardType="phone-pad" />
-              <TextLabel style={styles.helperText}>{language === 'bn' ? 'ডেমো চেকআউট — কোনো প্রকৃত পেমেন্ট নেওয়া হবে না।' : 'Demo checkout — no real payment will be charged.'}</TextLabel>
-              <ActionButton title={`${t('confirmPayment')} · ৳${currentBillAmount.toLocaleString()}`} onPress={completePayment} fontFamily={font} />
-            </Card>
-            <Card style={styles.infoBox}><TextLabel style={styles.infoText}>Settle in instalments. CWASA supports up to 3 monthly instalments for overdue bills above ৳3,000.</TextLabel></Card>
+                <Card>
+                  <View style={styles.rowBetween}><TextLabel bold>MAY 2026</TextLabel><TextLabel style={styles.statusPill}>{t('pending')}</TextLabel></View>
+                  <TextLabel style={styles.helperText}>Account {displayAccountNo} · Meter {latestApprovedReading?.meterNumber ?? '443920'}</TextLabel>
+                  <View style={styles.amountLine}><TextLabel style={styles.billAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel><TextLabel style={styles.helperText}>Due 15 May 2026</TextLabel></View>
+                  {latestApprovedReading ? <TextLabel style={styles.helperText}>{t('latestMeterReading')}: {latestApprovedReading.previousReading.toLocaleString()} → {latestApprovedReading.currentReading.toLocaleString()} m³ ({meterConsumption.toLocaleString()} m³)</TextLabel> : null}
+                  <View style={styles.separator} />
+                  <View style={styles.rowBetween}><TextLabel>{t('previousBalance')}</TextLabel><TextLabel>৳0</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>{t('currentCharges')}</TextLabel><TextLabel>৳{Math.max(0, currentBillAmount - 50).toLocaleString()}</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>{t('adjustment')}</TextLabel><TextLabel>৳0</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>{t('serviceCharge')}</TextLabel><TextLabel>৳50</TextLabel></View>
+                  <View style={styles.separator} />
+                  <View style={styles.rowBetween}><TextLabel bold>{t('totalPayable')}</TextLabel><TextLabel bold style={styles.totalValue}>৳{currentBillAmount.toLocaleString()}</TextLabel></View>
+                </Card>
+                <Card>
+                  <SectionTitle title={t('paymentMethod')} />
+                  <View style={styles.paymentMethodGrid}>
+                    {paymentMethods.map((method) => (
+                      <Pressable key={method} onPress={() => setPaymentMethod(method)} style={[styles.paymentOption, paymentMethod === method && styles.paymentOptionSelected]}>
+                        <View style={[styles.radio, paymentMethod === method && styles.radioSelected]} />
+                        <TextLabel>{method}</TextLabel>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Field label={t('paymentNumber')} value={paymentPhone} onChangeText={setPaymentPhone} keyboardType="phone-pad" />
+                  <TextLabel style={styles.helperText}>{language === 'bn' ? 'ডেমো চেকআউট — কোনো প্রকৃত পেমেন্ট নেওয়া হবে না।' : 'Demo checkout — no real payment will be charged.'}</TextLabel>
+                  <ActionButton title={`${t('confirmPayment')} · ৳${currentBillAmount.toLocaleString()}`} onPress={completePayment} fontFamily={font} />
+                </Card>
+                <Card style={styles.infoBox}><TextLabel style={styles.infoText}>Settle in instalments. CWASA supports up to 3 monthly instalments for overdue bills above ৳3,000.</TextLabel></Card>
               </>
             )}
           </View>
@@ -827,13 +896,6 @@ export default function App() {
               {([
                 ['serviceNewConnection', '＋', 'new-connection'],
                 ['billQuery', '৳', 'bill'],
-                ['deepTubeWell', '♧', 'support'],
-                ['ownershipRecord', '▣', 'support'],
-                ['meterChange', '◉', 'support'],
-                ['meterTesting', '⌕', 'support'],
-                ['waterQuality', '♧', 'support'],
-                ['disconnection', '⊖', 'support'],
-                ['reconnection', '↻', 'support'],
               ] as [TranslationKey, string, Screen][]).map(([title, icon, destination], index) => (
                 <Pressable key={title} onPress={() => destination === 'support' ? showNotice(`${t(title)} · ${t('hotline')}: 16129`) : setScreen(destination)} style={styles.catalogTile}>
                   <View style={[styles.catalogIcon, { backgroundColor: [colors.paleBlue, colors.paleAmber, colors.paleGreen, '#F2EDFF', colors.paleBlue, colors.paleRed][index % 6] }]}><TextLabel bold style={{ color: [colors.blue, colors.amber, colors.green, colors.purple][index % 4], fontSize: 21 }}>{icon}</TextLabel></View>
@@ -856,7 +918,7 @@ export default function App() {
                 <View style={styles.profileDetails}>
                   {profileEditing ? <TextInput value={connectionName} onChangeText={setConnectionName} style={[sharedStyles.input, styles.nameInput, { fontFamily: fontBold }]} /> : <TextLabel bold style={styles.profileName}>{connectionName}</TextLabel>}
                   <TextLabel style={styles.helperText}>+880 {phone || '1712 345 678'}</TextLabel>
-                  <TextLabel style={styles.helperText}>Account CW-2026-0488</TextLabel>
+                  <TextLabel style={styles.helperText}>Account {displayAccountNo}</TextLabel>
                 </View>
                 <Pressable onPress={() => { setProfileEditing((value) => !value); showNotice(profileEditing ? t('save') : t('edit')); }}><TextLabel style={styles.linkText}>{profileEditing ? t('save') : t('edit')}</TextLabel></Pressable>
               </View>
@@ -883,7 +945,7 @@ export default function App() {
               <PreferenceToggle title={t('smsFallback')} value={smsFallback} onChange={setSmsFallback} />
               <View style={styles.separator} />
               <ActionButton title={translateGuest(language, 'publicServices')} onPress={() => openPublicServices()} secondary fontFamily={font} />
-              <ActionButton title={language === 'bn' ? 'লগ আউট' : 'Sign out'} onPress={() => { setIsGuest(false); setScreen('welcome'); }} secondary fontFamily={font} />
+              <ActionButton title={language === 'bn' ? 'লগ আউট' : 'Sign out'} onPress={() => { signOutCustomer(); setCustomerSession(null); setCustomerBills([]); setIsGuest(false); setScreen('welcome'); }} secondary fontFamily={font} />
             </Card>
           </View>
         );
@@ -956,8 +1018,6 @@ export default function App() {
             {notice ? <Pressable onPress={() => setNotice('')}><TextLabel style={styles.notice}>{notice}　×</TextLabel></Pressable> : null}
             {screenContent}
             <View style={styles.footer}>
-              <Image source={require('./assets/wateraid-logo.png')} style={styles.footerLogo} resizeMode="contain" />
-              <TextLabel style={styles.footerText}>A partnership for better water services · Chattogram WASA</TextLabel>
             </View>
           </ScrollView>
         </View>
@@ -974,8 +1034,6 @@ export default function App() {
           {notice ? <Pressable onPress={() => setNotice('')}><TextLabel style={styles.notice}>{notice}　×</TextLabel></Pressable> : null}
           {screenContent}
           <View style={styles.footer}>
-            <Image source={require('./assets/wateraid-logo.png')} style={styles.footerLogo} resizeMode="contain" />
-            <TextLabel style={styles.footerText}>A partnership for better water services · Chattogram WASA</TextLabel>
           </View>
         </ScrollView>
         {bottomNav}

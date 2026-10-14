@@ -4,7 +4,7 @@ A shared React Native and Expo application for web, Android, and iOS. Run `npm i
 
 The app includes the customer flows in the supplied UI exploration: welcome and sign-in, bills and payments, payment history, new-connection applications and status tracking, complaints and status tracking, notifications, customer services, and account preferences. Guests and signed-in customers can also access About CWASA, FAQs, and a separate complaint form with contact details and location. Camera and location access are requested only when the customer chooses to attach evidence or use their current location.
 
-The supplied CWASA and WaterAid logos and Shurjo/RBNylo fonts are bundled locally.
+The supplied CWASA and WaterAid logos, Shurjo regular and bold fonts, and RBNylo-Bold font are bundled locally. Regular text uses Shurjo; bold text uses Shurjo-Bold for Bangla and RBNylo-Bold for English.
 
 Public information and complaint UI are separated into `GuestServices.tsx` and `guestTranslations.ts` so the guest flows and their English/Bangla copy can be maintained independently.
 
