@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { colors, sharedStyles } from './theme';
+import { colors, fontFamilyForText, sharedStyles } from './theme';
 import { Language } from './translation';
 import { GuestSection, GuestTranslationKey, translateGuest } from './guestTranslations';
 
@@ -25,8 +25,6 @@ export type GuestComplaint = {
 type GuestServicesProps = {
   section: GuestSection;
   language: Language;
-  fontFamily: string;
-  boldFontFamily: string;
   onNavigate: (section: GuestSection) => void;
   onSignIn: () => void;
   onSubmit: (complaint: GuestComplaint) => void;
@@ -43,8 +41,6 @@ const questions = [
 export default function GuestServices({
   section,
   language,
-  fontFamily,
-  boldFontFamily,
   onNavigate,
   onSignIn,
   onSubmit,
@@ -60,7 +56,7 @@ export default function GuestServices({
 
   const t = (key: GuestTranslationKey) => translateGuest(language, key);
   const label = (content: string, style?: object, bold = false) => (
-    <Text style={[styles.text, { fontFamily: bold ? boldFontFamily : fontFamily }, style]}>{content}</Text>
+    <Text style={[styles.text, { fontFamily: fontFamilyForText(content, bold, language) }, style]}>{content}</Text>
   );
 
   const useCurrentLocation = async () => {
@@ -150,7 +146,7 @@ export default function GuestServices({
         autoCapitalize={key === 'email' ? 'none' : 'sentences'}
         multiline={options.multiline}
         textAlignVertical={options.multiline ? 'top' : 'center'}
-        style={[sharedStyles.input, options.multiline && styles.multiline, { fontFamily, fontSize: 14 }]}
+        style={[sharedStyles.input, options.multiline && styles.multiline, { fontFamily: fontFamilyForText(value || (options.placeholder ? t(options.placeholder) : t(key)), false, language), fontSize: 14 }]}
       />
     </View>
   );

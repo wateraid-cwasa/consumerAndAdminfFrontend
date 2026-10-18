@@ -1,4 +1,5 @@
 import { StyleSheet } from 'react-native';
+import type { Language } from './translation';
 
 export const colors = {
   blue: '#0964C7',
@@ -17,6 +18,16 @@ export const colors = {
   paleRed: '#FFF0F0',
   purple: '#7758BD',
 };
+
+export const openSansRegular = {
+  uri: 'https://fonts.gstatic.com/s/opensans/v44/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsjZ0C4n.ttf',
+};
+
+export function fontFamilyForText(text: string, bold: boolean, language: Language): string {
+  const containsBangla = /[\u0980-\u09FF]/.test(text) || (!text && language === 'bn');
+  if (containsBangla) return bold ? 'Shurjo-Bold' : 'Shurjo';
+  return bold ? 'RBNylo-Bold' : 'OpenSans';
+}
 
 export const sharedStyles = StyleSheet.create({
   card: {

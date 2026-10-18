@@ -3,7 +3,6 @@ import {
   Image,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -11,7 +10,8 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
-import { colors, sharedStyles } from './theme';
+import { colors, fontFamilyForText, openSansRegular, sharedStyles } from './theme';
+import styles from './meterAdminStyles';
 import {
   getMeterReadings,
   MeterReading,
@@ -121,6 +121,7 @@ const copy = {
 
 export default function MeterAdmin() {
   const [fontsLoaded] = useFonts({
+    OpenSans: openSansRegular,
     Shurjo: require('./fonts/Shurjo-Regular.ttf'),
     'Shurjo-Bold': require('./fonts/Shurjo-bold.ttf'),
     'RBNylo-Bold': require('./fonts/RBNylo-Bold.otf'),
@@ -142,8 +143,6 @@ export default function MeterAdmin() {
   const [notice, setNotice] = useState('');
   const passwordInput = useRef<TextInput | null>(null);
   const t = (key: keyof typeof copy.en) => copy[language][key];
-  const font = 'Shurjo';
-  const boldFont = language === 'bn' ? 'Shurjo-Bold' : 'RBNylo-Bold';
 
   useEffect(() => {
     const refresh = () => setReadings(getMeterReadings());
@@ -217,7 +216,7 @@ export default function MeterAdmin() {
   };
 
   const label = (content: string, style?: object, bold = false) => (
-    <Text style={[styles.text, { fontFamily: bold ? boldFont : font }, style]}>{content}</Text>
+    <Text style={[styles.text, { fontFamily: fontFamilyForText(content, bold, language) }, style]}>{content}</Text>
   );
 
   if (!fontsLoaded) {
@@ -254,7 +253,7 @@ export default function MeterAdmin() {
                 autoComplete="username"
                 keyboardType="email-address"
                 onSubmitEditing={() => passwordInput.current?.focus()}
-                style={[sharedStyles.input, { fontFamily: font }]}
+                style={[sharedStyles.input, { fontFamily: fontFamilyForText(email || t('email'), false, language) }]}
               />
             </View>
             <View style={styles.loginField}>
@@ -269,7 +268,7 @@ export default function MeterAdmin() {
                 secureTextEntry
                 autoComplete="current-password"
                 onSubmitEditing={signIn}
-                style={[sharedStyles.input, { fontFamily: font }]}
+                style={[sharedStyles.input, { fontFamily: fontFamilyForText(password || t('password'), false, language) }]}
               />
             </View>
             {loginError ? label(loginError, styles.loginError) : null}
@@ -339,7 +338,7 @@ export default function MeterAdmin() {
                 onChangeText={setSearch}
                 placeholder={t('search')}
                 placeholderTextColor={colors.muted}
-                style={[sharedStyles.input, styles.searchInput, { fontFamily: font }]}
+                style={[sharedStyles.input, styles.searchInput, { fontFamily: fontFamilyForText(search || t('search'), false, language) }]}
               />
               <View style={styles.filters}>
                 {(['pending', 'approved', 'rejected', 'all'] as QueueFilter[]).map((item) => (
@@ -382,11 +381,11 @@ export default function MeterAdmin() {
                   <View style={styles.readingInputs}>
                     <View style={styles.readingField}>
                       {label(t('previous'), styles.fieldLabel, true)}
-                      <TextInput value={previousDraft} onChangeText={setPreviousDraft} keyboardType="numeric" style={[sharedStyles.input, { fontFamily: font }]} />
+                      <TextInput value={previousDraft} onChangeText={setPreviousDraft} keyboardType="numeric" style={[sharedStyles.input, { fontFamily: fontFamilyForText(previousDraft, false, language) }]} />
                     </View>
                     <View style={styles.readingField}>
                       {label(t('current'), styles.fieldLabel, true)}
-                      <TextInput value={currentDraft} onChangeText={setCurrentDraft} keyboardType="numeric" style={[sharedStyles.input, { fontFamily: font }]} />
+                      <TextInput value={currentDraft} onChangeText={setCurrentDraft} keyboardType="numeric" style={[sharedStyles.input, { fontFamily: fontFamilyForText(currentDraft, false, language) }]} />
                     </View>
                   </View>
                   <View style={styles.consumptionCard}>
@@ -400,7 +399,7 @@ export default function MeterAdmin() {
                       onChangeText={setNotesDraft}
                       multiline
                       textAlignVertical="top"
-                      style={[sharedStyles.input, styles.notesInput, { fontFamily: font }]}
+                      style={[sharedStyles.input, styles.notesInput, { fontFamily: fontFamilyForText(notesDraft || t('notes'), false, language) }]}
                     />
                   </View>
                   <View style={styles.actions}>
@@ -452,104 +451,3 @@ function statusPale(status: MeterReadingStatus): string {
 function statusCopy(language: AdminLanguage, status: MeterReadingStatus): string {
   return copy[language][status];
 }
-
-const styles = StyleSheet.create({
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
-  loadingText: { fontFamily: 'RBNylo-Bold', color: colors.blue, fontSize: 24 },
-  root: { flex: 1, backgroundColor: '#F3F6FA', alignItems: 'center' },
-  loginRoot: { flex: 1, backgroundColor: '#F3F6FA' },
-  loginTopBar: { minHeight: 72, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  loginContent: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
-  loginCard: { width: '100%', maxWidth: 430, backgroundColor: colors.white, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 24 },
-  loginIcon: { width: 47, height: 47, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paleBlue, marginBottom: 14 },
-  loginIconText: { color: colors.blue, fontSize: 24 },
-  loginTitle: { color: colors.ink, fontSize: 22 },
-  loginSubtitle: { color: colors.muted, fontSize: 12, marginTop: 5, marginBottom: 19 },
-  loginField: { marginBottom: 13 },
-  loginError: { color: colors.red, fontSize: 12, marginBottom: 8 },
-  loginButton: { minHeight: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 11, backgroundColor: colors.blue, marginTop: 3 },
-  loginButtonText: { color: colors.white, fontSize: 13 },
-  shell: { flex: 1, width: '100%', maxWidth: 1440 },
-  topBar: { minHeight: 72, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  logo: { width: 42, height: 42 },
-  brandTitle: { color: colors.blue, fontSize: 15 },
-  brandSubtitle: { color: colors.muted, fontSize: 11 },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  roleBadge: { color: colors.deepBlue, backgroundColor: colors.paleBlue, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 16, fontSize: 10 },
-  languageButton: { borderColor: colors.border, borderWidth: 1, borderRadius: 17, paddingVertical: 6, paddingHorizontal: 10 },
-  languageText: { color: colors.blue, fontSize: 11 },
-  page: { padding: 22, paddingBottom: 36 },
-  pageHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, gap: 12 },
-  pageTitle: { fontSize: 24, color: colors.ink },
-  pageSubtitle: { fontSize: 12, color: colors.muted, marginTop: 3 },
-  customerLink: { padding: 10 },
-  customerLinkText: { color: colors.blue, fontSize: 12 },
-  headingActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
-  logoutButton: { borderRadius: 9, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, paddingVertical: 8, paddingHorizontal: 10 },
-  logoutText: { color: colors.muted, fontSize: 11 },
-  statRow: { gap: 10, marginBottom: 16 },
-  statRowWide: { flexDirection: 'row' },
-  statCard: { minHeight: 76, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 14 },
-  statAccent: { width: 4, height: 38, borderRadius: 3 },
-  statLabel: { color: colors.muted, fontSize: 11 },
-  statValue: { color: colors.ink, fontSize: 20, marginTop: 2 },
-  notice: { padding: 12, borderRadius: 11, backgroundColor: colors.paleBlue, marginBottom: 12 },
-  noticeText: { color: colors.deepBlue, fontSize: 12 },
-  workspace: { gap: 14 },
-  workspaceWide: { flexDirection: 'row', alignItems: 'flex-start' },
-  queuePanel: { backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 15 },
-  queuePanelWide: { width: 355, maxHeight: 720 },
-  detailsPanel: { flex: 1, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 18, minHeight: 430 },
-  detailsPanelWide: { minHeight: 580 },
-  panelHeading: { marginBottom: 11 },
-  panelHeadingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  panelTitle: { fontSize: 16 },
-  searchInput: { minHeight: 42, fontSize: 12, marginBottom: 10 },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  filterButton: { paddingVertical: 6, paddingHorizontal: 9, borderRadius: 14, backgroundColor: colors.background },
-  filterSelected: { backgroundColor: colors.blue },
-  filterText: { color: colors.muted, fontSize: 10 },
-  filterTextSelected: { color: colors.white },
-  queueCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 11, marginBottom: 8 },
-  queueCardSelected: { borderColor: colors.blue, backgroundColor: '#F7FAFF' },
-  queueTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  queueCustomer: { fontSize: 13, flex: 1 },
-  statusDot: { width: 9, height: 9, borderRadius: 5 },
-  queueMeta: { color: colors.muted, fontSize: 10, marginTop: 4 },
-  queueLocation: { color: colors.ink, fontSize: 11, marginTop: 4 },
-  queueBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  readingId: { color: colors.muted, fontSize: 9 },
-  emptyText: { color: colors.muted, fontSize: 12, paddingVertical: 22, textAlign: 'center' },
-  statusPill: { paddingVertical: 5, paddingHorizontal: 9, borderRadius: 14 },
-  hint: { color: colors.muted, fontSize: 11, marginBottom: 14 },
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 15 },
-  infoItem: { width: '47%', minHeight: 51, padding: 9, backgroundColor: colors.background, borderRadius: 9 },
-  infoLabel: { color: colors.muted, fontSize: 10 },
-  infoValue: { color: colors.ink, fontSize: 12, marginTop: 3 },
-  readingInputs: { flexDirection: 'row', gap: 10 },
-  readingField: { flex: 1, marginBottom: 10 },
-  fieldLabel: { fontSize: 11, marginBottom: 5 },
-  consumptionCard: { padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderRadius: 11, backgroundColor: colors.paleBlue, marginBottom: 14 },
-  consumptionLabel: { color: colors.deepBlue, fontSize: 12 },
-  consumptionValue: { color: colors.deepBlue, fontSize: 17 },
-  notesField: { marginBottom: 10 },
-  notesInput: { minHeight: 77, paddingTop: 10 },
-  actions: { gap: 9, marginTop: 2 },
-  saveButton: { minHeight: 42, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderColor: colors.blue, borderWidth: 1 },
-  saveText: { color: colors.blue, fontSize: 12 },
-  reviewActions: { flexDirection: 'row', gap: 9 },
-  rejectButton: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 10, backgroundColor: colors.paleRed },
-  rejectText: { color: colors.red, fontSize: 12 },
-  approveButton: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 10, backgroundColor: colors.blue },
-  approveText: { color: colors.white, fontSize: 12 },
-  disabledButton: { opacity: 0.45 },
-  emptyDetails: { flex: 1, minHeight: 360, alignItems: 'center', justifyContent: 'center', padding: 30 },
-  emptyIcon: { width: 50, height: 50, borderRadius: 25, backgroundColor: colors.paleBlue, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  emptyIconText: { color: colors.blue, fontSize: 20 },
-  emptyTitle: { textAlign: 'center', fontSize: 17 },
-  emptyDescription: { color: colors.muted, textAlign: 'center', fontSize: 12, lineHeight: 19, marginTop: 6, maxWidth: 370 },
-  prototypeNote: { paddingVertical: 14, alignItems: 'center' },
-  prototypeText: { color: colors.muted, textAlign: 'center', fontSize: 10, lineHeight: 15 },
-  text: { color: colors.ink, fontSize: 12 },
-});

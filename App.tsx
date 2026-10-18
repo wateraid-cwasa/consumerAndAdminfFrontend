@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   Image,
   Linking,
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -15,7 +16,8 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
-import { colors, sharedStyles } from './theme';
+import { colors, fontFamilyForText, openSansRegular, sharedStyles } from './theme';
+import styles from './styles';
 import { Language, TranslationKey, translate } from './translation';
 import GuestServices, { GuestComplaint } from './GuestServices';
 import { GuestSection, translateGuest } from './guestTranslations';
@@ -76,13 +78,22 @@ const initialNotifications: NotificationItem[] = [
 ];
 
 const paymentMethods = ['bKash', 'Nagad', 'Debit / credit', 'Internet banking'];
+const demoBill = {
+  registrationNumber: '000494029',
+  previousReading: 296,
+  previousReadingDate: '31/07/26',
+  presentReading: 327,
+  presentReadingDate: '31/08/26',
+  readingDays: 31,
+  ratePerUnit: 37,
+} as const;
 
 function ActionButton({
   title,
   onPress,
   secondary = false,
   disabled = false,
-  fontFamily = 'Shurjo',
+  fontFamily = 'OpenSans',
   compact = false,
 }: {
   title: string;
@@ -105,7 +116,7 @@ function ActionButton({
         pressed && !disabled && styles.pressed,
       ]}
     >
-      <Text style={[styles.buttonText, secondary && styles.buttonSecondaryText, compact && styles.buttonCompactText, { fontFamily }]}>
+      <Text style={[styles.buttonText, secondary && styles.buttonSecondaryText, compact && styles.buttonCompactText, { fontFamily: fontFamilyForText(title, false, fontFamily === 'Shurjo' ? 'bn' : 'en') }]}>
         {title}
       </Text>
     </Pressable>
@@ -116,7 +127,7 @@ function Chip({
   title,
   selected,
   onPress,
-  fontFamily = 'Shurjo',
+  fontFamily = 'OpenSans',
 }: {
   title: string;
   selected: boolean;
@@ -125,13 +136,14 @@ function Chip({
 }) {
   return (
     <Pressable onPress={onPress} style={[styles.chip, selected && styles.chipSelected]}>
-      <Text style={[styles.chipText, selected && styles.chipTextSelected, { fontFamily }]}>{title}</Text>
+      <Text style={[styles.chipText, selected && styles.chipTextSelected, { fontFamily: fontFamilyForText(title, false, fontFamily === 'Shurjo' ? 'bn' : 'en') }]}>{title}</Text>
     </Pressable>
   );
 }
 
 export default function App() {
   const [fontsLoaded] = useFonts({
+    OpenSans: openSansRegular,
     Shurjo: require('./fonts/Shurjo-Regular.ttf'),
     'Shurjo-Bold': require('./fonts/Shurjo-bold.ttf'),
     'RBNylo-Bold': require('./fonts/RBNylo-Bold.otf'),
@@ -180,6 +192,7 @@ export default function App() {
   const [largeText, setLargeText] = useState(false);
   const [smsFallback, setSmsFallback] = useState(true);
   const [billFilter, setBillFilter] = useState<'due' | 'paid'>('due');
+  const [billCardShowingDetails, setBillCardShowingDetails] = useState(false);
   const [profileEditing, setProfileEditing] = useState(false);
   const [applicationStage, setApplicationStage] = useState(2);
   const [applicationSummary, setApplicationSummary] = useState('New domestic connection');
@@ -190,10 +203,16 @@ export default function App() {
   );
   const cameraRef = useRef<CameraView>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const billCardShine = useRef(new Animated.Value(0)).current;
+  const billCardFlipScale = useRef(new Animated.Value(1)).current;
+  const billCardTurning = useRef(false);
 
   const t = useCallback((key: TranslationKey) => translate(language, key), [language]);
-  const font = 'Shurjo';
-  const fontBold = language === 'bn' ? 'Shurjo-Bold' : 'RBNylo-Bold';
+  const font = language === 'bn' ? 'Shurjo' : 'OpenSans';
+  const demoConsumption = demoBill.presentReading - demoBill.previousReading;
+  const demoCharge = demoConsumption * demoBill.ratePerUnit;
+  const demoVat = Math.round(demoCharge * 0.15);
+  const demoNetPayable = demoCharge + demoVat;
   const unreadCount = useMemo(() => notifications.filter((item) => !item.read).length, [notifications]);
   const meterConsumption = latestApprovedReading
     ? Math.max(0, latestApprovedReading.currentReading - latestApprovedReading.previousReading)
@@ -201,7 +220,10 @@ export default function App() {
   const realCurrentBill = customerBills[0]?.billTotal != null ? Number(customerBills[0].billTotal) : null;
   const currentBillAmount = realCurrentBill !== null && Number.isFinite(realCurrentBill)
     ? Math.round(realCurrentBill)
-    : Math.max(50, Math.round(meterConsumption * 1.2 + 50));
+    : demoNetPayable;
+  const billVatAmount = realCurrentBill !== null && Number.isFinite(realCurrentBill)
+    ? Math.max(0, currentBillAmount - demoCharge)
+    : demoVat;
   const displayAccountNo = customerSession?.accountNo ?? 'CW-2026-0488';
 
   useEffect(() => {
@@ -210,6 +232,26 @@ export default function App() {
       setLatestApprovedReading(getLatestApprovedReading('CW-2026-0488'));
     });
   }, []);
+
+  useEffect(() => {
+    if (screen !== 'home') {
+      setBillCardShowingDetails(false);
+      billCardFlipScale.stopAnimation();
+      billCardFlipScale.setValue(1);
+      billCardTurning.current = false;
+    }
+  }, [billCardFlipScale, screen]);
+
+  useEffect(() => {
+    if (screen !== 'home' || isGuest) return;
+    const animation = Animated.loop(Animated.timing(billCardShine, {
+      toValue: 1,
+      duration: 2600,
+      useNativeDriver: true,
+    }));
+    animation.start();
+    return () => animation.stop();
+  }, [billCardShine, isGuest, screen]);
 
   const loadCustomerBills = useCallback(async () => {
     try {
@@ -230,6 +272,32 @@ export default function App() {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     setNotice(message);
     noticeTimer.current = setTimeout(() => setNotice(''), 4200);
+  };
+
+  const flipBillCard = () => {
+    if (billCardTurning.current) return;
+    billCardTurning.current = true;
+
+    const showingDetails = billCardShowingDetails;
+    const animateScale = (toValue: number, onComplete: (finished: boolean) => void) => {
+      Animated.timing(billCardFlipScale, {
+        toValue,
+        duration: 230,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }).start(({ finished }) => onComplete(finished));
+    };
+
+    animateScale(0.03, (reachedEdge) => {
+      if (!reachedEdge) {
+        billCardTurning.current = false;
+        return;
+      }
+      setBillCardShowingDetails(!showingDetails);
+      animateScale(1, () => {
+        billCardTurning.current = false;
+      });
+    });
   };
 
   const beginSignIn = () => {
@@ -455,7 +523,14 @@ export default function App() {
   const TextLabel = ({ children, style, bold = false }: { children: React.ReactNode; style?: object; bold?: boolean }) => (
     <Text style={[
       styles.text,
-      { fontFamily: bold ? fontBold : font, fontSize: largeText ? 17 : 14 },
+      {
+        fontFamily: fontFamilyForText(
+          typeof children === 'string' || typeof children === 'number' ? String(children) : '',
+          bold,
+          language,
+        ),
+        fontSize: largeText ? 17 : 14,
+      },
       style,
     ]}>
       {children}
@@ -488,7 +563,7 @@ export default function App() {
         keyboardType={keyboardType ?? 'default'}
         multiline={multiline}
         textAlignVertical={multiline ? 'top' : 'center'}
-        style={[sharedStyles.input, multiline && styles.multilineInput, { fontFamily: font, fontSize: largeText ? 17 : 14 }]}
+        style={[sharedStyles.input, multiline && styles.multilineInput, { fontFamily: fontFamilyForText(value || placeholder || label, false, language), fontSize: largeText ? 17 : 14 }]}
       />
     </View>
   );
@@ -554,8 +629,8 @@ export default function App() {
         ['account', '♙', t('account')],
       ] as [Screen, string, string][]).map(([target, icon, label]) => (
         <Pressable key={target} onPress={() => setScreen(target)} style={styles.navItem} accessibilityRole="tab" accessibilityState={{ selected: screen === target }}>
-          <TextLabel style={[styles.navIcon, (screen === target || (target === 'support' && ['complaint-form', 'complaints', 'new-connection', 'application'].includes(screen))) && styles.navSelected]}>{icon}</TextLabel>
-          <TextLabel style={[styles.navLabel, (screen === target || (target === 'support' && ['complaint-form', 'complaints', 'new-connection', 'application'].includes(screen))) && styles.navSelected]}>{label}</TextLabel>
+          <TextLabel bold style={[styles.navIcon, (screen === target || (target === 'support' && ['complaint-form', 'complaints', 'new-connection', 'application'].includes(screen))) && styles.navSelected]}>{icon}</TextLabel>
+          <TextLabel bold style={[styles.navLabel, (screen === target || (target === 'support' && ['complaint-form', 'complaints', 'new-connection', 'application'].includes(screen))) && styles.navSelected]}>{label}</TextLabel>
         </Pressable>
       ))}
     </View>
@@ -617,14 +692,95 @@ export default function App() {
           <View>
             <Heading title={`${t('welcomeBack')}, Anika`} subtitle="Water services, made simple." />
             <View style={[styles.dashboardRow, wide && styles.dashboardRowWide]}>
-              <View style={[styles.billHero, wide && styles.billHeroWide]}>
-                <View style={styles.heroTop}><TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel><TextLabel style={styles.heroTag}>{t(currentBillPaid ? 'paid' : 'pending')}</TextLabel></View>
-                <TextLabel bold style={styles.heroAmount}>{currentBillPaid ? '৳ 0' : `৳ ${currentBillAmount.toLocaleString()}`}</TextLabel>
-                <TextLabel style={styles.heroDue}>{currentBillPaid ? 'Paid in full' : `Due 15 May 2026 · ${t('dueIn')}`}</TextLabel>
-                <View style={styles.heroBottom}>
-                  <TextLabel style={styles.heroAccount}>Account {displayAccountNo}</TextLabel>
-                  <ActionButton title={currentBillPaid ? t('transactionHistory') : t('payNow')} onPress={() => { if (currentBillPaid) setScreen('history'); else setScreen('bill'); }} fontFamily={font} compact />
-                </View>
+              <View style={[styles.billCardViewport, wide && styles.billCardViewportWide]}>
+                <Animated.View
+                  style={[
+                    styles.billCardFlipContainer,
+                    { transform: [{ scaleX: billCardFlipScale }] },
+                  ]}
+                >
+                {billCardShowingDetails ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={language === 'bn' ? 'বিলে ফিরে যান' : 'Return to bill card'}
+                    onPress={flipBillCard}
+                    style={[styles.billReceiptFace, styles.billCardDetailsPressable]}
+                  >
+                    <View pointerEvents="none" style={styles.billReceiptContent}>
+                      <View style={styles.billReceiptHeader}>
+                        <View>
+                          <TextLabel bold style={styles.billReceiptTitle}>{language === 'bn' ? 'পানির বিল' : 'WATER BILL'}</TextLabel>
+                          <TextLabel style={styles.billReceiptMeta}>Regd. No. {demoBill.registrationNumber}</TextLabel>
+                        </View>
+                        <TextLabel style={styles.billReceiptPeriod}>AUG 2026</TextLabel>
+                      </View>
+                      <View style={styles.billReceiptDivider} />
+                      <View style={styles.billReceiptRow}>
+                        <TextLabel style={styles.billReceiptLabel}>Previous reading · {demoBill.previousReadingDate}</TextLabel>
+                        <TextLabel bold style={styles.billReceiptValue}>{demoBill.previousReading} m³</TextLabel>
+                      </View>
+                      <View style={styles.billReceiptRow}>
+                        <TextLabel style={styles.billReceiptLabel}>Present reading · {demoBill.presentReadingDate}</TextLabel>
+                        <TextLabel bold style={styles.billReceiptValue}>{demoBill.presentReading} m³</TextLabel>
+                      </View>
+                      <View style={styles.billReceiptRow}>
+                        <TextLabel style={styles.billReceiptLabel}>Consumption · {demoBill.readingDays} days</TextLabel>
+                        <TextLabel bold style={styles.billReceiptValue}>{demoConsumption} m³</TextLabel>
+                      </View>
+                      <View style={styles.billReceiptDivider} />
+                      <View style={styles.billReceiptRow}>
+                        <TextLabel style={styles.billReceiptLabel}>Amount @ ৳{demoBill.ratePerUnit.toFixed(2)}/m³</TextLabel>
+                        <TextLabel style={styles.billReceiptValue}>৳{demoCharge.toLocaleString()}</TextLabel>
+                      </View>
+                      <View style={styles.billReceiptRow}>
+                        <TextLabel style={styles.billReceiptLabel}>VAT @ 15%</TextLabel>
+                        <TextLabel style={styles.billReceiptValue}>৳{billVatAmount.toLocaleString()}</TextLabel>
+                      </View>
+                      <View style={styles.billReceiptTotal}>
+                        <TextLabel bold style={styles.billReceiptTotalLabel}>NET PAYABLE</TextLabel>
+                        <TextLabel bold style={styles.billReceiptTotalAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel>
+                      </View>
+                    </View>
+                    <TextLabel style={styles.billReceiptFlipHint}>Tap to return　↻</TextLabel>
+                  </Pressable>
+                ) : (
+                  <View style={[styles.billHero, styles.billCardFace, wide && styles.billHeroWide]}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={language === 'bn' ? 'বিলের বিবরণ দেখুন' : 'Show bill details'}
+                      accessibilityState={{ expanded: false }}
+                      onPress={flipBillCard}
+                      style={styles.billCardFlipHitArea}
+                    />
+                    <View pointerEvents="none" style={styles.billFrontContent}>
+                      <Animated.View style={[styles.billShine, { transform: [{ translateX: billCardShine.interpolate({ inputRange: [0, 1], outputRange: [-320, 620] }) }, { rotate: '22deg' }] }]} />
+                      <View style={styles.heroTop}>
+                        <TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel>
+                        <TextLabel style={styles.heroTag}>{t(currentBillPaid ? 'paid' : 'pending')}</TextLabel>
+                      </View>
+                      <View style={styles.billFrontMiddle}>
+                        <View>
+                          <TextLabel bold style={styles.heroAmount}>{currentBillPaid ? '৳ 0' : `৳ ${currentBillAmount.toLocaleString()}`}</TextLabel>
+                          <TextLabel style={styles.heroDue}>{currentBillPaid ? 'Paid in full' : `Due 15 Sep 2026 · ${t('dueIn')}`}</TextLabel>
+                          <TextLabel style={styles.billFlipHint}>{language === 'bn' ? 'বিলের বিস্তারিত দেখতে ট্যাপ করুন' : 'Tap card to view breakdown'}　↻</TextLabel>
+                        </View>
+                        <View style={styles.billCurrencySymbol}><TextLabel bold style={styles.billCurrencyText}>৳</TextLabel></View>
+                      </View>
+                      <View style={styles.heroBottom}>
+                        <TextLabel style={styles.heroAccount}>Account {displayAccountNo} · Bill 08/2026</TextLabel>
+                      </View>
+                    </View>
+                    <View style={styles.billPayButton}>
+                      <ActionButton
+                        title={currentBillPaid ? t('transactionHistory') : t('payNow')}
+                        onPress={() => { if (currentBillPaid) setScreen('history'); else setScreen('bill'); }}
+                        fontFamily={font}
+                        compact
+                      />
+                    </View>
+                  </View>
+                )}
+                </Animated.View>
               </View>
               <View style={[styles.serviceGrid, wide && styles.serviceGridWide]}>
                 <SectionTitle title={t('services')} />
@@ -700,15 +856,15 @@ export default function App() {
             ) : (
               <>
                 <Card>
-                  <View style={styles.rowBetween}><TextLabel bold>MAY 2026</TextLabel><TextLabel style={styles.statusPill}>{t('pending')}</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel bold>AUG 2026</TextLabel><TextLabel style={styles.statusPill}>{t('pending')}</TextLabel></View>
                   <TextLabel style={styles.helperText}>Account {displayAccountNo} · Meter {latestApprovedReading?.meterNumber ?? '443920'}</TextLabel>
-                  <View style={styles.amountLine}><TextLabel style={styles.billAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel><TextLabel style={styles.helperText}>Due 15 May 2026</TextLabel></View>
-                  {latestApprovedReading ? <TextLabel style={styles.helperText}>{t('latestMeterReading')}: {latestApprovedReading.previousReading.toLocaleString()} → {latestApprovedReading.currentReading.toLocaleString()} m³ ({meterConsumption.toLocaleString()} m³)</TextLabel> : null}
+                  <View style={styles.amountLine}><TextLabel style={styles.billAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel><TextLabel style={styles.helperText}>Due 15 Sep 2026</TextLabel></View>
                   <View style={styles.separator} />
-                  <View style={styles.rowBetween}><TextLabel>{t('previousBalance')}</TextLabel><TextLabel>৳0</TextLabel></View>
-                  <View style={styles.rowBetween}><TextLabel>{t('currentCharges')}</TextLabel><TextLabel>৳{Math.max(0, currentBillAmount - 50).toLocaleString()}</TextLabel></View>
-                  <View style={styles.rowBetween}><TextLabel>{t('adjustment')}</TextLabel><TextLabel>৳0</TextLabel></View>
-                  <View style={styles.rowBetween}><TextLabel>{t('serviceCharge')}</TextLabel><TextLabel>৳50</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>Previous reading · {demoBill.previousReadingDate}</TextLabel><TextLabel>{demoBill.previousReading} m³</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>Present reading · {demoBill.presentReadingDate}</TextLabel><TextLabel>{demoBill.presentReading} m³</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>Consumption · {demoBill.readingDays} days</TextLabel><TextLabel>{demoConsumption} m³</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>Amount @ ৳{demoBill.ratePerUnit.toFixed(2)}/m³</TextLabel><TextLabel>৳{demoCharge.toLocaleString()}</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel>VAT @ 15%</TextLabel><TextLabel>৳{billVatAmount.toLocaleString()}</TextLabel></View>
                   <View style={styles.separator} />
                   <View style={styles.rowBetween}><TextLabel bold>{t('totalPayable')}</TextLabel><TextLabel bold style={styles.totalValue}>৳{currentBillAmount.toLocaleString()}</TextLabel></View>
                 </Card>
@@ -916,7 +1072,7 @@ export default function App() {
               <View style={styles.profileHeader}>
                 <View style={styles.avatar}><TextLabel bold style={styles.avatarText}>AR</TextLabel></View>
                 <View style={styles.profileDetails}>
-                  {profileEditing ? <TextInput value={connectionName} onChangeText={setConnectionName} style={[sharedStyles.input, styles.nameInput, { fontFamily: fontBold }]} /> : <TextLabel bold style={styles.profileName}>{connectionName}</TextLabel>}
+                  {profileEditing ? <TextInput value={connectionName} onChangeText={setConnectionName} style={[sharedStyles.input, styles.nameInput, { fontFamily: fontFamilyForText(connectionName, true, language) }]} /> : <TextLabel bold style={styles.profileName}>{connectionName}</TextLabel>}
                   <TextLabel style={styles.helperText}>+880 {phone || '1712 345 678'}</TextLabel>
                   <TextLabel style={styles.helperText}>Account {displayAccountNo}</TextLabel>
                 </View>
@@ -939,7 +1095,7 @@ export default function App() {
             </Card>
             <Card>
               <SectionTitle title={t('preferences')} />
-              <View style={styles.preferenceRow}><View><TextLabel bold>{t('language')}</TextLabel><TextLabel style={styles.helperText}>{language === 'en' ? 'বাংলা, English available' : 'বাংলা, English পাওয়া যায়'}</TextLabel></View><View style={styles.preferenceActions}><Pressable onPress={() => setLanguage('bn')}><TextLabel style={[styles.languageChoice, language === 'bn' && styles.languageChoiceSelected]}>বাং</TextLabel></Pressable><Pressable onPress={() => setLanguage('en')}><TextLabel style={[styles.languageChoice, language === 'en' && styles.languageChoiceSelected]}>EN</TextLabel></Pressable></View></View>
+              <View style={styles.preferenceRow}><View><TextLabel bold>{t('language')}</TextLabel><TextLabel style={styles.helperText}>{language === 'en' ? 'বাংলা, English' : 'বাংলা, English'}</TextLabel></View><View style={styles.preferenceActions}><Pressable onPress={() => setLanguage('bn')}><TextLabel style={[styles.languageChoice, language === 'bn' && styles.languageChoiceSelected]}>বাং</TextLabel></Pressable><Pressable onPress={() => setLanguage('en')}><TextLabel style={[styles.languageChoice, language === 'en' && styles.languageChoiceSelected]}>EN</TextLabel></Pressable></View></View>
               <View style={styles.separator} />
               <PreferenceToggle title={t('largeText')} value={largeText} onChange={setLargeText} />
               <PreferenceToggle title={t('smsFallback')} value={smsFallback} onChange={setSmsFallback} />
@@ -954,8 +1110,6 @@ export default function App() {
           <GuestServices
             section={guestSection}
             language={language}
-            fontFamily={font}
-            boldFontFamily={fontBold}
             onNavigate={setGuestSection}
             onSignIn={beginSignIn}
             onSubmit={registerGuestComplaint}
@@ -1051,200 +1205,3 @@ export default function App() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blue },
-  loadingText: { color: colors.white, fontFamily: 'RBNylo-Bold', fontSize: 26 },
-  appRoot: { flex: 1, backgroundColor: colors.background, alignItems: 'center' },
-  appShell: { flex: 1, width: '100%', maxWidth: 560, backgroundColor: colors.background },
-  appShellWide: { maxWidth: 1120, borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.border },
-  guestRoot: { flex: 1, backgroundColor: colors.background, alignItems: 'center' },
-  guestShell: { flex: 1, width: '100%', maxWidth: 560, backgroundColor: colors.background },
-  guestHeader: { justifyContent: 'space-between' },
-  header: { minHeight: 69, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 17, backgroundColor: colors.white, borderBottomColor: colors.border, borderBottomWidth: 1, gap: 9 },
-  headerWide: { paddingHorizontal: 28 },
-  headerLogo: { width: 39, height: 39 },
-  brandText: { flex: 1 },
-  brandName: { color: colors.blue, fontSize: 12, letterSpacing: 0.35 },
-  brandSub: { fontSize: 10, color: colors.muted },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  publicInfoButton: { width: 31, height: 31, borderRadius: 16, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  publicInfoText: { color: colors.blue, fontSize: 17 },
-  guestSignInButton: { borderRadius: 18, backgroundColor: colors.blue, paddingVertical: 7, paddingHorizontal: 12 },
-  guestSignInText: { color: colors.white, fontSize: 11 },
-  languageButton: { borderColor: colors.border, borderWidth: 1, paddingVertical: 5, paddingHorizontal: 9, borderRadius: 20 },
-  languageText: { fontSize: 12, color: colors.blue },
-  notificationButton: { width: 34, height: 34, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paleBlue, position: 'relative' },
-  notificationIcon: { fontSize: 19, color: colors.blue },
-  notificationBadge: { position: 'absolute', right: -2, top: -2, borderRadius: 8, minWidth: 15, height: 15, backgroundColor: colors.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  badgeText: { fontSize: 9, fontFamily: 'RBNylo-Bold', color: colors.white },
-  content: { padding: 16, paddingBottom: 30 },
-  contentWide: { paddingHorizontal: 30, paddingTop: 24 },
-  bottomNav: { minHeight: 69, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: Platform.OS === 'ios' ? 8 : 0 },
-  navItem: { alignItems: 'center', justifyContent: 'center', gap: 2, flex: 1 },
-  navIcon: { color: colors.muted, fontSize: 21, lineHeight: 25 },
-  navLabel: { color: colors.muted, fontSize: 10 },
-  navSelected: { color: colors.blue },
-  text: { color: colors.ink, fontSize: 14 },
-  heading: { marginBottom: 16 },
-  headingTitle: { fontSize: 21, color: colors.ink },
-  headingSubtitle: { color: colors.muted, marginTop: 3, fontSize: 12 },
-  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 3, marginBottom: 11 },
-  sectionTitle: { fontSize: 15 },
-  linkText: { color: colors.blue, fontSize: 12 },
-  button: { minHeight: 46, borderRadius: 12, paddingHorizontal: 15, backgroundColor: colors.blue, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
-  buttonSecondary: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
-  buttonDisabled: { opacity: 0.55 },
-  buttonText: { color: colors.white, fontSize: 14 },
-  buttonSecondaryText: { color: colors.blue },
-  buttonCompact: { minHeight: 36, paddingHorizontal: 12, marginTop: 0 },
-  buttonCompactText: { fontSize: 12 },
-  pressed: { opacity: 0.75 },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 7 },
-  chip: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 22 },
-  chipSelected: { backgroundColor: colors.blue, borderColor: colors.blue },
-  chipText: { color: colors.ink, fontSize: 12 },
-  chipTextSelected: { color: colors.white },
-  field: { marginBottom: 13 },
-  fieldLabel: { color: colors.ink, fontSize: 12, marginBottom: 6 },
-  multilineInput: { minHeight: 94, paddingTop: 12 },
-  helperText: { color: colors.muted, fontSize: 11, lineHeight: 17 },
-  formScreen: { paddingTop: 5 },
-  inlineLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
-  welcomeRoot: { flex: 1, backgroundColor: colors.blue },
-  welcomeScreen: { flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 26, paddingTop: Platform.OS === 'web' ? 50 : 75, paddingBottom: 33, width: '100%', maxWidth: 530, alignSelf: 'center' },
-  welcomeBrand: { alignItems: 'center', marginTop: 20 },
-  welcomeLogo: { width: 122, height: 92, backgroundColor: colors.white, borderRadius: 17, marginBottom: 26 },
-  welcomeTo: { color: '#D6E8FF', letterSpacing: 2, fontSize: 11, textTransform: 'uppercase' },
-  welcomeTitle: { color: colors.white, fontSize: 26, marginTop: 8 },
-  welcomeSub: { color: '#D6E8FF', marginTop: 3, fontSize: 14 },
-  partnerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,.27)', borderRadius: 13, padding: 10, width: '100%', maxWidth: 355 },
-  partnerCaption: { color: '#D6E8FF', fontSize: 11 },
-  partnerLogo: { width: 112, height: 30, backgroundColor: colors.white, borderRadius: 4 },
-  welcomeActions: { width: '100%', maxWidth: 380 },
-  legalText: { color: '#D6E8FF', textAlign: 'center', fontSize: 10, marginTop: 14 },
-  notice: { backgroundColor: '#EAF3FF', color: colors.deepBlue, padding: 12, borderRadius: 11, marginBottom: 12, overflow: 'hidden' },
-  dashboardRow: { gap: 8 },
-  dashboardRowWide: { flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginBottom: 8 },
-  billHero: { backgroundColor: colors.blue, borderRadius: 20, padding: 19, marginBottom: 16 },
-  billHeroWide: { flex: 1, minHeight: 212, justifyContent: 'space-between', marginBottom: 0 },
-  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  heroEyebrow: { color: '#E6F1FF', fontSize: 12 },
-  heroTag: { color: colors.blue, backgroundColor: colors.white, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 14, fontSize: 10 },
-  heroAmount: { fontSize: 31, color: colors.white, marginTop: 11 },
-  heroDue: { color: '#E6F1FF', fontSize: 11, marginTop: 2 },
-  heroBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 17 },
-  heroAccount: { color: '#DCEBFF', fontSize: 10 },
-  statusPill: { color: colors.amber, backgroundColor: colors.paleAmber, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 13, fontSize: 10 },
-  serviceGrid: { marginBottom: 9 },
-  serviceGridWide: { flex: 1, paddingTop: 7 },
-  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  serviceTile: { width: '23%', minHeight: 89, borderRadius: 14, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, paddingHorizontal: 4, marginBottom: 8 },
-  tileIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 5 },
-  tileLabel: { textAlign: 'center', fontSize: 10, lineHeight: 14 },
-  quickHelp: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, backgroundColor: '#FFFAE9' },
-  quickHelpText: { flex: 1 },
-  applicationPreview: { marginTop: 0 },
-  meterReadingCard: { borderColor: '#D4E6FB', backgroundColor: '#FCFDFF' },
-  meterReadingValues: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
-  readingArrow: { color: colors.muted, fontSize: 16 },
-  consumptionValue: { marginLeft: 'auto', alignItems: 'flex-end' },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginVertical: 3 },
-  progressTrack: { height: 5, borderRadius: 5, backgroundColor: colors.border, marginTop: 14, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: colors.blue, borderRadius: 5 },
-  billTabs: { flexDirection: 'row', gap: 8, marginBottom: 13 },
-  billTab: { flex: 1, alignItems: 'center', paddingVertical: 9, backgroundColor: colors.white, borderRadius: 10, overflow: 'hidden' },
-  billTabText: { color: colors.muted },
-  billTabTextActive: { color: colors.white },
-  billTabActive: { backgroundColor: colors.blue },
-  amountLine: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 14, marginBottom: 4 },
-  billAmount: { fontSize: 27, color: colors.blue, fontFamily: 'RBNylo-Bold' },
-  separator: { height: 1, backgroundColor: colors.border, marginVertical: 11 },
-  totalValue: { fontSize: 16, color: colors.blue },
-  paymentMethodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  paymentOption: { width: '48%', flexDirection: 'row', alignItems: 'center', gap: 8, borderColor: colors.border, borderWidth: 1, borderRadius: 10, padding: 10 },
-  paymentOptionSelected: { borderColor: colors.blue, backgroundColor: colors.paleBlue },
-  radio: { height: 15, width: 15, borderRadius: 8, borderWidth: 1, borderColor: colors.muted },
-  radioSelected: { borderWidth: 5, borderColor: colors.blue },
-  infoBox: { backgroundColor: colors.paleAmber, borderColor: '#F1E0A4' },
-  infoText: { color: '#735713', fontSize: 12, lineHeight: 18 },
-  successMark: { width: 64, height: 64, borderRadius: 32, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paleGreen, marginBottom: 18 },
-  successCheck: { fontSize: 33, color: colors.green },
-  balanceCard: { backgroundColor: colors.blue, borderColor: colors.blue },
-  historyCard: { flexDirection: 'row', gap: 11 },
-  historyIcon: { width: 32, height: 32, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paleGreen },
-  historyCheck: { color: colors.green },
-  historyDetails: { flex: 1 },
-  paidPill: { color: colors.green, backgroundColor: colors.paleGreen, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, fontSize: 10 },
-  pendingPill: { color: colors.amber, backgroundColor: colors.paleAmber, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, fontSize: 10 },
-  locationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, marginBottom: 8 },
-  locationBox: { minHeight: 56, flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: colors.background, borderRadius: 11, padding: 10, marginBottom: 8 },
-  locationPin: { color: colors.red, fontSize: 18 },
-  locationAddress: { flex: 1, fontSize: 11 },
-  coordinateText: { color: colors.green, fontSize: 11, marginBottom: 10 },
-  applicationHero: { backgroundColor: colors.blue, borderColor: colors.blue },
-  applicationNumber: { fontSize: 18, color: colors.white, marginTop: 8 },
-  applicationStats: { flexDirection: 'row', gap: 25, marginTop: 17 },
-  statValue: { fontFamily: 'RBNylo-Bold', color: colors.white, fontSize: 18 },
-  timelineItem: { flexDirection: 'row', gap: 12, minHeight: 90 },
-  timelineDot: { width: 11, height: 11, borderRadius: 7, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.white, marginTop: 4 },
-  timelineDotDone: { backgroundColor: colors.green, borderColor: colors.green },
-  timelineDotCurrent: { backgroundColor: colors.blue, borderColor: colors.blue },
-  timelineContent: { flex: 1, paddingBottom: 15, borderLeftWidth: 1, borderColor: colors.border, marginLeft: -18, paddingLeft: 23 },
-  timelineDetail: { color: colors.muted, fontSize: 10, marginTop: 2 },
-  actionRow: { flexDirection: 'row', gap: 7, marginTop: 8, flexWrap: 'wrap' },
-  photoRow: { flexDirection: 'row', gap: 10, marginBottom: 14, marginTop: 7 },
-  photoPlaceholder: { width: 76, height: 65, borderRadius: 11, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
-  photoThumbnail: { width: 76, height: 65, borderRadius: 11 },
-  photoIcon: { color: colors.muted, fontSize: 19 },
-  photoLabel: { color: colors.muted, fontSize: 9 },
-  complaintHero: { backgroundColor: colors.purple, borderColor: colors.purple },
-  complaintTitle: { color: colors.white, fontSize: 20, marginTop: 7 },
-  complaintAssignee: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 15, backgroundColor: 'rgba(255,255,255,.14)', padding: 9, borderRadius: 11 },
-  activityRow: { flexDirection: 'row', gap: 12, marginVertical: 7 },
-  activityDot: { width: 10, height: 10, borderRadius: 6, marginTop: 5 },
-  notificationsHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  notificationCard: { flexDirection: 'row', gap: 10, alignItems: 'center', padding: 12, marginBottom: 9 },
-  notificationUnread: { borderColor: '#D8E8FF', backgroundColor: '#FBFDFF' },
-  notificationItemIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  notificationItemContent: { flex: 1 },
-  unreadDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.blue },
-  hotlineCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  hotlineIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: colors.paleBlue, alignItems: 'center', justifyContent: 'center' },
-  hotlineGlyph: { fontSize: 19, color: colors.blue },
-  hotlineDetails: { flex: 1 },
-  serviceCatalog: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 10 },
-  catalogTile: { width: '31.5%', minHeight: 103, padding: 10, borderRadius: 15, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', marginBottom: 9 },
-  catalogIcon: { width: 41, height: 41, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginBottom: 7 },
-  catalogLabel: { textAlign: 'center', fontSize: 10, lineHeight: 14 },
-  profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  avatar: { width: 43, height: 43, borderRadius: 24, backgroundColor: colors.paleBlue, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: colors.blue, fontSize: 16 },
-  profileDetails: { flex: 1 },
-  profileName: { fontSize: 16 },
-  nameInput: { minHeight: 37, paddingVertical: 3 },
-  profileStats: { flexDirection: 'row', gap: 9, marginTop: 17 },
-  profileStat: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 13, paddingVertical: 9, alignItems: 'center' },
-  profileStatNumber: { fontSize: 17 },
-  connectionCard: { flexDirection: 'row', gap: 10, alignItems: 'center', padding: 13, marginBottom: 8 },
-  connectionIndicator: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.green },
-  connectionPending: { backgroundColor: colors.amber },
-  connectionInfo: { flex: 1 },
-  preferenceRow: { minHeight: 57, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 8 },
-  preferenceActions: { flexDirection: 'row', gap: 5 },
-  languageChoice: { color: colors.muted, borderRadius: 7, overflow: 'hidden', paddingVertical: 5, paddingHorizontal: 8, backgroundColor: colors.background, fontSize: 11 },
-  languageChoiceSelected: { color: colors.white, backgroundColor: colors.blue },
-  switchTrack: { width: 42, height: 24, borderRadius: 15, justifyContent: 'center', backgroundColor: '#D6DCE5', paddingHorizontal: 3 },
-  switchTrackOn: { backgroundColor: colors.blue },
-  switchThumb: { width: 18, height: 18, borderRadius: 10, backgroundColor: colors.white, alignSelf: 'flex-start' },
-  switchThumbOn: { alignSelf: 'flex-end' },
-  footer: { alignItems: 'center', paddingTop: 8, paddingBottom: 8 },
-  footerLogo: { width: 93, height: 29, marginBottom: 5 },
-  footerText: { textAlign: 'center', color: colors.muted, fontSize: 9 },
-  cameraOverlay: { ...StyleSheet.absoluteFill, zIndex: 10, backgroundColor: '#000' },
-  cameraView: { flex: 1 },
-  cameraControls: { minHeight: 94, paddingHorizontal: 24, paddingBottom: 17, backgroundColor: '#111', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  captureButton: { width: 62, height: 62, borderRadius: 32, borderWidth: 3, borderColor: colors.white, alignItems: 'center', justifyContent: 'center' },
-  captureInner: { width: 48, height: 48, borderRadius: 25, backgroundColor: colors.white },
-  cameraSpacer: { width: 66 },
-});
