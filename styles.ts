@@ -336,12 +336,25 @@ const styles = StyleSheet.create({
   },
   billCardDetailsPressable: { width: "100%", height: "100%" },
   billReceiptContent: { flex: 1, justifyContent: "space-between", padding: 14 },
-  billReceiptHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  billReceiptHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   billReceiptTitle: { color: colors.blue, fontSize: 14, letterSpacing: 0.5 },
   billReceiptMeta: { color: colors.muted, fontSize: 9, marginTop: 1 },
   billReceiptPeriod: { color: colors.deepBlue, fontSize: 10 },
-  billReceiptDivider: { height: 1, backgroundColor: colors.border, marginVertical: 3 },
-  billReceiptRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
+  billReceiptDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: 3,
+  },
+  billReceiptRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
   billReceiptLabel: { color: colors.muted, fontSize: 10 },
   billReceiptValue: { color: colors.ink, fontSize: 10 },
   billReceiptTotal: {
@@ -354,7 +367,11 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     marginTop: 2,
   },
-  billReceiptTotalLabel: { color: colors.deepBlue, fontSize: 11, letterSpacing: 0.4 },
+  billReceiptTotalLabel: {
+    color: colors.deepBlue,
+    fontSize: 11,
+    letterSpacing: 0.4,
+  },
   billReceiptTotalAmount: { color: colors.blue, fontSize: 16 },
   heroTop: {
     flexDirection: "row",

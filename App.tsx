@@ -741,7 +741,6 @@ export default function App() {
                         <TextLabel bold style={styles.billReceiptTotalAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel>
                       </View>
                     </View>
-                    <TextLabel style={styles.billReceiptFlipHint}>Tap to return　↻</TextLabel>
                   </Pressable>
                 ) : (
                   <View style={[styles.billHero, styles.billCardFace, wide && styles.billHeroWide]}>
