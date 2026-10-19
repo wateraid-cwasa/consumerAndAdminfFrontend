@@ -52,7 +52,6 @@ const styles = StyleSheet.create({
   headerLogo: { width: 39, height: 39 },
   brandText: { flex: 1 },
   brandName: { color: colors.blue, fontSize: 12, letterSpacing: 0.35 },
-  brandSub: { fontSize: 10, color: colors.muted },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   publicInfoButton: {
     width: 31,

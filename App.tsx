@@ -588,7 +588,6 @@ export default function App() {
       </Pressable>
       <View style={styles.brandText}>
         <TextLabel bold style={styles.brandName}>CHATTOGRAM WASA</TextLabel>
-        <TextLabel style={styles.brandSub}>WaterAid Bangladesh</TextLabel>
       </View>
       <View style={styles.headerActions}>
         <Pressable onPress={() => openPublicServices()} style={styles.publicInfoButton} accessibilityLabel={translateGuest(language, 'publicServices')}>
@@ -598,7 +597,7 @@ export default function App() {
           <TextLabel style={styles.languageText}>{language === 'en' ? 'বাং' : 'EN'}</TextLabel>
         </Pressable>
         <Pressable onPress={() => setScreen('notifications')} style={styles.notificationButton} accessibilityLabel={t('notifications')}>
-          <TextLabel style={styles.notificationIcon}>🕭</TextLabel>
+          <Text style={styles.notificationIcon}>🔔</Text>
           {unreadCount > 0 ? <View style={styles.notificationBadge}><Text style={styles.badgeText}>{unreadCount}</Text></View> : null}
         </Pressable>
       </View>
@@ -1117,7 +1116,6 @@ export default function App() {
             </Pressable>
             <View style={styles.brandText}>
               <TextLabel bold style={styles.brandName}>CHATTOGRAM WASA</TextLabel>
-              <TextLabel style={styles.brandSub}>{translateGuest(language, 'publicServices')}</TextLabel>
             </View>
             <View style={styles.headerActions}>
               <Pressable onPress={() => setLanguage((current) => current === 'en' ? 'bn' : 'en')} style={styles.languageButton} accessibilityLabel={t('language')}>
