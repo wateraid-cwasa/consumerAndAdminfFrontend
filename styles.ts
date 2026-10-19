@@ -442,15 +442,6 @@ const styles = StyleSheet.create({
   },
   quickHelpText: { flex: 1 },
   applicationPreview: { marginTop: 0 },
-  meterReadingCard: { borderColor: "#D4E6FB", backgroundColor: "#FCFDFF" },
-  meterReadingValues: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginTop: 12,
-  },
-  readingArrow: { color: colors.muted, fontSize: 16 },
-  consumptionValue: { marginLeft: "auto", alignItems: "flex-end" },
   rowBetween: {
     flexDirection: "row",
     alignItems: "center",

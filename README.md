@@ -8,15 +8,11 @@ The supplied CWASA and WaterAid logos, Shurjo regular and bold fonts, and RBNylo
 
 Public information and complaint UI are separated into `GuestServices.tsx` and `guestTranslations.ts` so the guest flows and their English/Bangla copy can be maintained independently.
 
-The web-only meter review dashboard is available directly at `/meteradmin` and is not linked from customer navigation. It presents a login screen, then lists sample meter-reader submissions for an administrator to edit, approve, or reject. Prototype login: email `meteradmin`, password `meteradmin`. Approved readings update the customer meter summary and demo bill estimate in other tabs of the same browser using local storage.
-
-The meter queue, authentication, customer records, and bill calculation are prototype-only. The sample login is checked in client-side code and is not a security boundary. Do not expose `/meteradmin` as a production admin system until server-side identity, role authorization, and backend data storage are implemented.
-
 ## Deploy to Render
 
-The repository includes a Render Blueprint at `render.yaml`. In Render, create a new Blueprint and select this Git repository. Render builds the Expo web export and publishes the `dist` directory as a static site. The rewrite route keeps direct links such as `/meteradmin` working. No environment variables are currently required.
+The repository includes a Render Blueprint at `render.yaml`. In Render, create a new Blueprint and select this Git repository. Render builds the Expo web export and publishes the `dist` directory as a static site. The rewrite route supports direct links to app routes. No environment variables are currently required.
 
-This is a static frontend prototype: authentication, payments, applications, complaints, and meter data are not backed by production services. Do not use the deployed sample meter-admin login as a security boundary or expose it for real administrative use.
+This is a static frontend prototype: authentication, payments, applications, and complaints are not backed by production services.
 
 ## Build and serve with Docker
 

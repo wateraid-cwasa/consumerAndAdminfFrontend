@@ -21,8 +21,6 @@ import styles from './styles';
 import { Language, TranslationKey, translate } from './translation';
 import GuestServices, { GuestComplaint } from './GuestServices';
 import { GuestSection, translateGuest } from './guestTranslations';
-import MeterAdmin from './MeterAdmin';
-import { getLatestApprovedReading, MeterReading, subscribeToMeterReadings } from './meterReadings';
 import {
   requestCustomerOtp,
   verifyCustomerOtp,
@@ -198,9 +196,6 @@ export default function App() {
   const [applicationSummary, setApplicationSummary] = useState('New domestic connection');
   const [showPaymentConfirmation, setShowPaymentConfirmation] = useState(false);
   const [currentBillPaid, setCurrentBillPaid] = useState(false);
-  const [latestApprovedReading, setLatestApprovedReading] = useState<MeterReading | undefined>(
-    () => Platform.OS === 'web' ? getLatestApprovedReading('CW-2026-0488') : undefined,
-  );
   const cameraRef = useRef<CameraView>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const billCardShine = useRef(new Animated.Value(0)).current;
@@ -214,9 +209,6 @@ export default function App() {
   const demoVat = Math.round(demoCharge * 0.15);
   const demoNetPayable = demoCharge + demoVat;
   const unreadCount = useMemo(() => notifications.filter((item) => !item.read).length, [notifications]);
-  const meterConsumption = latestApprovedReading
-    ? Math.max(0, latestApprovedReading.currentReading - latestApprovedReading.previousReading)
-    : 1000;
   const realCurrentBill = customerBills[0]?.billTotal != null ? Number(customerBills[0].billTotal) : null;
   const currentBillAmount = realCurrentBill !== null && Number.isFinite(realCurrentBill)
     ? Math.round(realCurrentBill)
@@ -224,14 +216,7 @@ export default function App() {
   const billVatAmount = realCurrentBill !== null && Number.isFinite(realCurrentBill)
     ? Math.max(0, currentBillAmount - demoCharge)
     : demoVat;
-  const displayAccountNo = customerSession?.accountNo ?? 'CW-2026-0488';
-
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    return subscribeToMeterReadings(() => {
-      setLatestApprovedReading(getLatestApprovedReading('CW-2026-0488'));
-    });
-  }, []);
+  const displayAccountNo = customerSession?.accountNo ?? '070046SD';
 
   useEffect(() => {
     if (screen !== 'home') {
@@ -667,7 +652,7 @@ export default function App() {
           <View style={styles.formScreen}>
             <Heading title={t('continueWithMobile')} subtitle="Sign in to manage your CWASA services." />
             <Card>
-              <Field label="Account number" value={accountNumber} onChangeText={setAccountNumber} placeholder="CW-2026-0488" />
+              <Field label="Account number" value={accountNumber} onChangeText={setAccountNumber} placeholder="070046SD" />
               <Field label={t('phoneNumber')} value={phone} onChangeText={setPhone} placeholder="01XXXXXXXXX" keyboardType="phone-pad" />
               <ActionButton title={authBusy ? '...' : t('sendCode')} onPress={requestCode} fontFamily={font} />
             </Card>
@@ -793,21 +778,6 @@ export default function App() {
                 </View>
               </View>
             </View>
-            {latestApprovedReading ? (
-              <Card style={styles.meterReadingCard}>
-                <View style={styles.rowBetween}>
-                  <TextLabel bold>{t('latestMeterReading')}</TextLabel>
-                  <TextLabel style={styles.paidPill}>{t('approvedReading')}</TextLabel>
-                </View>
-                <TextLabel style={styles.helperText}>{latestApprovedReading.readingDate} · Meter {latestApprovedReading.meterNumber}</TextLabel>
-                <View style={styles.meterReadingValues}>
-                  <View><TextLabel style={styles.helperText}>{t('previousReading')}</TextLabel><TextLabel bold>{latestApprovedReading.previousReading.toLocaleString()} m³</TextLabel></View>
-                  <TextLabel style={styles.readingArrow}>→</TextLabel>
-                  <View><TextLabel style={styles.helperText}>{t('currentReading')}</TextLabel><TextLabel bold>{latestApprovedReading.currentReading.toLocaleString()} m³</TextLabel></View>
-                  <View style={styles.consumptionValue}><TextLabel style={styles.helperText}>{t('consumption')}</TextLabel><TextLabel bold style={styles.totalValue}>{meterConsumption.toLocaleString()} m³</TextLabel></View>
-                </View>
-              </Card>
-            ) : null}
             <Card style={styles.quickHelp}>
               <View style={styles.quickHelpText}>
                 <TextLabel bold>{t('quickHelp')}</TextLabel>
@@ -840,7 +810,7 @@ export default function App() {
           </View>
         ) : (
           <View>
-            <Heading title={t('billDetails')} subtitle={`Chattogram WASA · Account ${displayAccountNo}`} />
+            <Heading title={t('billDetails')}/>
             <View style={styles.billTabs}>
               <Pressable onPress={() => setBillFilter('due')} style={[styles.billTab, billFilter === 'due' && styles.billTabActive]}><TextLabel style={[styles.billTabText, billFilter === 'due' && styles.billTabTextActive]}>{t('dueBills')}</TextLabel></Pressable>
               <Pressable onPress={() => setBillFilter('paid')} style={[styles.billTab, billFilter === 'paid' && styles.billTabActive]}><TextLabel style={[styles.billTabText, billFilter === 'paid' && styles.billTabTextActive]}>{t('paidBills')}</TextLabel></Pressable>
@@ -856,7 +826,7 @@ export default function App() {
               <>
                 <Card>
                   <View style={styles.rowBetween}><TextLabel bold>AUG 2026</TextLabel><TextLabel style={styles.statusPill}>{t('pending')}</TextLabel></View>
-                  <TextLabel style={styles.helperText}>Account {displayAccountNo} · Meter {latestApprovedReading?.meterNumber ?? '443920'}</TextLabel>
+                  <TextLabel style={styles.helperText}>Account {displayAccountNo} · Meter 443920</TextLabel>
                   <View style={styles.amountLine}><TextLabel style={styles.billAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel><TextLabel style={styles.helperText}>Due 15 Sep 2026</TextLabel></View>
                   <View style={styles.separator} />
                   <View style={styles.rowBetween}><TextLabel>Previous reading · {demoBill.previousReadingDate}</TextLabel><TextLabel>{demoBill.previousReading} m³</TextLabel></View>
@@ -881,7 +851,6 @@ export default function App() {
                   <TextLabel style={styles.helperText}>{language === 'bn' ? 'ডেমো চেকআউট — কোনো প্রকৃত পেমেন্ট নেওয়া হবে না।' : 'Demo checkout — no real payment will be charged.'}</TextLabel>
                   <ActionButton title={`${t('confirmPayment')} · ৳${currentBillAmount.toLocaleString()}`} onPress={completePayment} fontFamily={font} />
                 </Card>
-                <Card style={styles.infoBox}><TextLabel style={styles.infoText}>Settle in instalments. CWASA supports up to 3 monthly instalments for overdue bills above ৳3,000.</TextLabel></Card>
               </>
             )}
           </View>
@@ -892,14 +861,14 @@ export default function App() {
             <Heading title={t('paymentHistory')} subtitle="Your recent water bill payments." />
             <Card style={styles.balanceCard}>
               <View style={styles.rowBetween}><View><TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel><TextLabel bold style={styles.heroAmount}>৳14,210</TextLabel></View><ActionButton title={t('export')} onPress={exportHistory} secondary fontFamily={font} compact /></View>
-              <TextLabel style={styles.helperText}>Account CW-2026-0488 · Updated today</TextLabel>
+              <TextLabel style={styles.helperText}>070046SD · Updated today</TextLabel>
             </Card>
             {payments.map((payment) => (
               <Card key={payment.id} style={styles.historyCard}>
                 <View style={styles.historyIcon}><TextLabel bold style={styles.historyCheck}>✓</TextLabel></View>
                 <View style={styles.historyDetails}>
                   <View style={styles.rowBetween}><TextLabel bold>{payment.date} water bill</TextLabel><TextLabel style={styles.paidPill}>{t('paid')}</TextLabel></View>
-                  <TextLabel style={styles.helperText}>Account CW-2026-0488 · {payment.id}</TextLabel>
+                  <TextLabel style={styles.helperText}>070046SD · {payment.id}</TextLabel>
                   <View style={styles.rowBetween}><TextLabel style={styles.helperText}>{payment.method}</TextLabel><TextLabel bold>৳{payment.amount.toLocaleString()}</TextLabel></View>
                   <LinkAction title="View receipt" onPress={() => showNotice(`${t('paymentReference')}: ${payment.id}`)} />
                 </View>
@@ -1084,12 +1053,12 @@ export default function App() {
             <SectionTitle title={t('myConnections')} />
             <Card style={styles.connectionCard}>
               <View style={styles.connectionIndicator} />
-              <View style={styles.connectionInfo}><TextLabel bold>Halishahar — primary</TextLabel><TextLabel style={styles.helperText}>Domestic · CWASA-2026-0488</TextLabel></View>
+              <View style={styles.connectionInfo}><TextLabel bold>Halishahar — primary</TextLabel><TextLabel style={styles.helperText}>Domestic  ·  042585SD</TextLabel></View>
               <TextLabel style={styles.paidPill}>{t('inProgress')}</TextLabel>
             </Card>
             <Card style={styles.connectionCard}>
               <View style={[styles.connectionIndicator, styles.connectionPending]} />
-              <View style={styles.connectionInfo}><TextLabel bold>Agrabad — shop</TextLabel><TextLabel style={styles.helperText}>Commercial · CWASA-2026-7724</TextLabel></View>
+              <View style={styles.connectionInfo}><TextLabel bold>Agrabad — shop</TextLabel><TextLabel style={styles.helperText}>Commercial · 070046SD</TextLabel></View>
               <TextLabel style={styles.pendingPill}>{t('pending')}</TextLabel>
             </Card>
             <Card>
@@ -1125,14 +1094,6 @@ export default function App() {
 
   function PreferenceToggle({ title, value, onChange }: { title: string; value: boolean; onChange: (value: boolean) => void }) {
     return <View style={styles.preferenceRow}><TextLabel bold>{title}</TextLabel><PreferenceSwitch value={value} onChange={onChange} /></View>;
-  }
-
-  if (
-    Platform.OS === 'web'
-    && typeof window !== 'undefined'
-    && window.location.pathname.replace(/\/+$/, '') === '/meteradmin'
-  ) {
-    return <MeterAdmin />;
   }
 
   if (screen === 'welcome') {
