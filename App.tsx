@@ -815,13 +815,13 @@ export default function App() {
               </View>
               <ActionButton title={t('hotline')} onPress={() => Linking.openURL('tel:16129').catch((error) => showNotice(error.message))} secondary fontFamily={font} compact />
             </Card>
-            <SectionTitle title={t('trackApplication')} action="See all" onAction={() => setScreen('application')} />
+            {/* <SectionTitle title={t('trackApplication')} action="See all" onAction={() => setScreen('application')} />
             <Card style={styles.applicationPreview}>
               <View style={styles.rowBetween}><TextLabel bold>{applicationId}</TextLabel><TextLabel style={styles.statusPill}>{t('inProgress')}</TextLabel></View>
               <TextLabel style={styles.helperText}>{applicationSummary} · Submitted 10 May 2026</TextLabel>
               <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${applicationStage * 25}%` }]} /></View>
               <LinkAction title={t('trackApplication')} onPress={() => setScreen('application')} />
-            </Card>
+            </Card> */}
           </View>
         );
       case 'bill':
@@ -907,30 +907,30 @@ export default function App() {
             ))}
           </View>
         );
-      case 'new-connection':
-        return (
-          <View>
-            <Heading title={t('applyConnection')} subtitle="Submit your property details to get started." />
-            <Card>
-              <SectionTitle title={t('connectionCategory')} />
-              <OptionChips options={['domestic', 'commercial', 'nonDomestic']} selected={connectionCategory} onSelect={setConnectionCategory} />
-              <Field label={t('applicantName')} value={connectionName} onChangeText={setConnectionName} placeholder="Full name" />
-              <Field label={t('nationalId')} value={nationalId} onChangeText={setNationalId} placeholder="10, 13 or 17 digits" keyboardType="numeric" />
-              <Field label={t('holdingNumber')} value={holdingNumber} onChangeText={setHoldingNumber} />
-              <Field label={t('propertyType')} value={propertyType} onChangeText={setPropertyType} placeholder={t('propertyResidential')} />
-              <SectionTitle title={t('pipeDiameter')} />
-              <View style={styles.chipWrap}>
-                {['½″', '¾″', '1″', '1½″'].map((diameter) => <Chip key={diameter} title={diameter} selected={pipeDiameter === diameter} onPress={() => setPipeDiameter(diameter)} fontFamily={font} />)}
-              </View>
-              <View style={styles.locationHeader}><TextLabel bold>{t('siteLocation')}</TextLabel><Pressable onPress={captureLocation}><TextLabel style={styles.linkText}>{t('useMyLocation')}</TextLabel></Pressable></View>
-              <View style={styles.locationBox}><TextLabel style={styles.locationPin}>⌖</TextLabel><TextLabel style={styles.locationAddress}>{siteLocation}</TextLabel><Pressable onPress={captureLocation}><TextLabel style={styles.linkText}>{t('change')}</TextLabel></Pressable></View>
-              {coordinates ? <TextLabel style={styles.coordinateText}>{coordinates}</TextLabel> : null}
-              <Field label={t('email')} value={connectionEmail} onChangeText={setConnectionEmail} placeholder="name@example.com" keyboardType="email-address" />
-              <TextLabel style={styles.infoText}>{t('connectionFeeInfo')}</TextLabel>
-              <ActionButton title={t('submitApplication')} onPress={submitNewApplication} fontFamily={font} />
-            </Card>
-          </View>
-        );
+      // case 'new-connection':
+      //   return (
+      //     <View>
+      //       <Heading title={t('applyConnection')} subtitle="Submit your property details to get started." />
+      //       <Card>
+      //         <SectionTitle title={t('connectionCategory')} />
+      //         <OptionChips options={['domestic', 'commercial', 'nonDomestic']} selected={connectionCategory} onSelect={setConnectionCategory} />
+      //         <Field label={t('applicantName')} value={connectionName} onChangeText={setConnectionName} placeholder="Full name" />
+      //         <Field label={t('nationalId')} value={nationalId} onChangeText={setNationalId} placeholder="10, 13 or 17 digits" keyboardType="numeric" />
+      //         <Field label={t('holdingNumber')} value={holdingNumber} onChangeText={setHoldingNumber} />
+      //         <Field label={t('propertyType')} value={propertyType} onChangeText={setPropertyType} placeholder={t('propertyResidential')} />
+      //         <SectionTitle title={t('pipeDiameter')} />
+      //         <View style={styles.chipWrap}>
+      //           {['½″', '¾″', '1″', '1½″'].map((diameter) => <Chip key={diameter} title={diameter} selected={pipeDiameter === diameter} onPress={() => setPipeDiameter(diameter)} fontFamily={font} />)}
+      //         </View>
+      //         <View style={styles.locationHeader}><TextLabel bold>{t('siteLocation')}</TextLabel><Pressable onPress={captureLocation}><TextLabel style={styles.linkText}>{t('useMyLocation')}</TextLabel></Pressable></View>
+      //         <View style={styles.locationBox}><TextLabel style={styles.locationPin}>⌖</TextLabel><TextLabel style={styles.locationAddress}>{siteLocation}</TextLabel><Pressable onPress={captureLocation}><TextLabel style={styles.linkText}>{t('change')}</TextLabel></Pressable></View>
+      //         {coordinates ? <TextLabel style={styles.coordinateText}>{coordinates}</TextLabel> : null}
+      //         <Field label={t('email')} value={connectionEmail} onChangeText={setConnectionEmail} placeholder="name@example.com" keyboardType="email-address" />
+      //         <TextLabel style={styles.infoText}>{t('connectionFeeInfo')}</TextLabel>
+      //         <ActionButton title={t('submitApplication')} onPress={submitNewApplication} fontFamily={font} />
+      //       </Card>
+      //     </View>
+      //   );
       case 'application':
         return (
           <View>
