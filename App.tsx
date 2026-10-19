@@ -588,6 +588,7 @@ export default function App() {
       </Pressable>
       <View style={styles.brandText}>
         <TextLabel bold style={styles.brandName}>CHATTOGRAM WASA</TextLabel>
+        <TextLabel style={styles.headingSubtitle}>Digital Water Services</TextLabel>
       </View>
       <View style={styles.headerActions}>
         <Pressable onPress={() => openPublicServices()} style={styles.publicInfoButton} accessibilityLabel={translateGuest(language, 'publicServices')}>
@@ -674,7 +675,7 @@ export default function App() {
       case 'home':
         return (
           <View>
-            <Heading title={`${t('welcomeBack')}, Anika`} subtitle="Water services, made simple." />
+            <Heading title={`${t('welcomeBack')}, Anika`} />
             <View style={[styles.dashboardRow, wide && styles.dashboardRowWide]}>
               <View style={[styles.billCardViewport, wide && styles.billCardViewportWide]}>
                 <Animated.View
@@ -744,7 +745,7 @@ export default function App() {
                       <View style={styles.billFrontMiddle}>
                         <View>
                           <TextLabel bold style={styles.heroAmount}>{currentBillPaid ? '৳ 0' : `৳ ${currentBillAmount.toLocaleString()}`}</TextLabel>
-                          <TextLabel style={styles.heroDue}>{currentBillPaid ? 'Paid in full' : `Due 15 Sep 2026 · ${t('dueIn')}`}</TextLabel>
+                          <TextLabel style={styles.heroDue}>{currentBillPaid ? 'Paid in full' : `Due 15 Sep 2026 `}</TextLabel>
                           <TextLabel style={styles.billFlipHint}>{language === 'bn' ? 'বিলের বিস্তারিত দেখতে ট্যাপ করুন' : 'Tap card to view breakdown'}　↻</TextLabel>
                         </View>
                         <View style={styles.billCurrencySymbol}><TextLabel bold style={styles.billCurrencyText}>৳</TextLabel></View>
@@ -860,7 +861,7 @@ export default function App() {
             <Heading title={t('paymentHistory')} subtitle="Your recent water bill payments." />
             <Card style={styles.balanceCard}>
               <View style={styles.rowBetween}><View><TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel><TextLabel bold style={styles.heroAmount}>৳14,210</TextLabel></View><ActionButton title={t('export')} onPress={exportHistory} secondary fontFamily={font} compact /></View>
-              <TextLabel style={styles.helperText}>070046SD · Updated today</TextLabel>
+              <TextLabel style={styles.heroEyebrow}>070046SD · Updated today</TextLabel>
             </Card>
             {payments.map((payment) => (
               <Card key={payment.id} style={styles.historyCard}>

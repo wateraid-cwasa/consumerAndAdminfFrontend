@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   billHero: {
-    backgroundColor: colors.blue,
+    backgroundColor: "#006BD9",
     borderRadius: 20,
     padding: 19,
     marginBottom: 16,
