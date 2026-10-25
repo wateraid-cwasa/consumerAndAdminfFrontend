@@ -4,7 +4,7 @@ const translations = {
   en: {
     welcome: 'Welcome to',
     platform: 'Customer Service Platform',
-    continueWithMobile: 'Continue with mobile number',
+    continueWithMobile: 'Sign in with account number',
     exploreGuest: 'Explore as guest',
     phoneNumber: 'Mobile number',
     sendCode: 'Send verification code',
@@ -137,7 +137,7 @@ const translations = {
   bn: {
     welcome: 'স্বাগতম',
     platform: 'গ্রাহক সেবা প্ল্যাটফর্ম',
-    continueWithMobile: 'মোবাইল নম্বর দিয়ে চালিয়ে যান',
+    continueWithMobile: 'অ্যাকাউন্ট নম্বর দিয়ে সাইন ইন',
     exploreGuest: 'অতিথি হিসেবে দেখুন',
     phoneNumber: 'মোবাইল নম্বর',
     sendCode: 'যাচাইকরণ কোড পাঠান',

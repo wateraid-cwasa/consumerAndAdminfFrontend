@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
     maxWidth: 530,
     alignSelf: "center",
   },
-  welcomeBrand: { alignItems: "center", marginTop: 20 },
+  welcomeBrand: { alignItems: "center", marginTop: 20, marginBottom: 24 },
   welcomeLogo: {
     width: 122,
     height: 92,
@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   billCurrencyText: { color: colors.white, fontSize: 34 },
-  billFlipHint: { color: "#D6E8FF", fontSize: 9, marginTop: 6 },
+  billFlipHint: { color: "#D6E8FF", fontSize: 12, marginTop: 6 },
   billShine: {
     position: "absolute",
     top: -30,

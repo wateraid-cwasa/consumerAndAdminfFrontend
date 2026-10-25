@@ -22,21 +22,24 @@ import { Language, TranslationKey, translate } from './translation';
 import GuestServices, { GuestComplaint } from './GuestServices';
 import { GuestSection, translateGuest } from './guestTranslations';
 import {
-  requestCustomerOtp,
-  verifyCustomerOtp,
+  loginCustomer,
+  registerCustomer,
   getStoredCustomerSession,
   getCustomerBills,
+  getCustomerProfile,
+  getLastBillsNote,
   signOutCustomer,
   ApiRequestError,
   ApiConnectionError,
   type CustomerSession,
-  type BillHistoryEntry,
+  type BillDetail,
+  type CustomerProfile,
 } from './consumerApi';
 
 type Screen =
   | 'welcome'
   | 'sign-in'
-  | 'verify'
+  | 'sign-up'
   | 'home'
   | 'bill'
   | 'history'
@@ -66,25 +69,47 @@ type Payment = {
   method: string;
 };
 
-const initialNotifications: NotificationItem[] = [
-  { id: 1, title: 'Field team is on the way', detail: 'Complaint CWASA-CMP-2026-1023 · ETA 13:30', category: 'Service', read: false, icon: '↗', color: colors.blue },
-  { id: 2, title: 'May bill is ready', detail: '৳1,250 due 15 May 2026', category: 'Bills', read: false, icon: '৳', color: colors.purple },
-  { id: 3, title: 'Site inspection confirmed', detail: 'Halishahar · Tomorrow at 10:00 AM', category: 'Service', read: true, icon: '✓', color: colors.green },
-  { id: 4, title: 'Planned supply interruption', detail: 'Halishahar zone · 12 May, 10:00–14:00', category: 'Alerts', read: true, icon: '!', color: colors.red },
-  { id: 5, title: 'OCR meter reading verified', detail: 'Your April meter reading has been confirmed', category: 'Bills', read: true, icon: '⌕', color: colors.amber },
-  { id: 6, title: 'SMS fallback is on', detail: 'You will receive critical alerts if you are offline', category: 'Alerts', read: true, icon: '•', color: colors.blue },
-];
+const initialNotifications: NotificationItem[] = [];
 
 const paymentMethods = ['bKash', 'Nagad', 'Debit / credit', 'Internet banking'];
-const demoBill = {
-  registrationNumber: '000494029',
-  previousReading: 296,
-  previousReadingDate: '31/07/26',
-  presentReading: 327,
-  presentReadingDate: '31/08/26',
-  readingDays: 31,
-  ratePerUnit: 37,
-} as const;
+// Components declared inside App() would get a new identity on every render, which remounts
+// their children and makes text inputs lose focus on each keystroke. This keeps one stable
+// component type while still rendering with the latest closure.
+function useStableComponent<P>(impl: (props: P) => React.ReactElement): (props: P) => React.ReactElement {
+  const ref = useRef(impl);
+  ref.current = impl;
+  return useMemo(() => (props: P) => ref.current(props), []);
+}
+
+function formatBillDate(value: string | null): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
+}
+
+function formatTaka(value: number): string {
+  return `৳${Math.round(value).toLocaleString('en-US')}`;
+}
+
+function startOfDay(value: Date): number {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+}
+
+function isPastDue(bill: BillDetail, now = new Date()): boolean {
+  if (!bill.dueDate || bill.status === 'PAID') return false;
+  const due = new Date(bill.dueDate);
+  return !Number.isNaN(due.getTime()) && startOfDay(now) > startOfDay(due);
+}
+
+// The amount to pay today: net payable up to the due date, then the matching late-payment step.
+function amountPayableToday(bill: BillDetail, now = new Date()): number {
+  if (!isPastDue(bill, now) || bill.surcharges.length === 0) return bill.netPayable;
+  const today = startOfDay(now);
+  const step = bill.surcharges.find((item) => startOfDay(new Date(item.deadline)) >= today)
+    ?? bill.surcharges[bill.surcharges.length - 1];
+  return step.totalPayable;
+}
 
 function ActionButton({
   title,
@@ -148,26 +173,30 @@ export default function App() {
   });
   const { width } = useWindowDimensions();
   const wide = width >= 820;
+  const tablet = width >= 600;
+  const compact = width < 380;
+  const veryCompact = width < 340;
+  const billCardHeight = compact ? 312 : 272;
   const [screen, setScreen] = useState<Screen>('welcome');
   const [isGuest, setIsGuest] = useState(false);
   const [language, setLanguage] = useState<Language>('en');
   const [guestSection, setGuestSection] = useState<GuestSection>('home');
   const [notice, setNotice] = useState('');
   const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [accountNumber, setAccountNumber] = useState('');
   const [customerSession, setCustomerSession] = useState<CustomerSession | null>(
     () => (Platform.OS === 'web' ? getStoredCustomerSession() : null),
   );
-  const [customerBills, setCustomerBills] = useState<BillHistoryEntry[]>([]);
+  const [customerBills, setCustomerBills] = useState<BillDetail[]>([]);
+  const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState(paymentMethods[0]);
-  const [paymentPhone, setPaymentPhone] = useState('01712 345 678');
-  const [payments, setPayments] = useState<Payment[]>([
-    { id: 'CW-PAY-2604-1842', date: '20 Apr 2026', amount: 1200, method: 'bKash' },
-    { id: 'CW-PAY-2603-0741', date: '21 Mar 2026', amount: 1150, method: 'Nagad' },
-    { id: 'CW-PAY-2602-5520', date: '19 Feb 2026', amount: 1150, method: 'Debit / credit' },
-  ]);
+  const [paymentPhone, setPaymentPhone] = useState('');
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [notifications, setNotifications] = useState(initialNotifications);
   const [notificationFilter, setNotificationFilter] = useState('All');
   const [applicationId, setApplicationId] = useState('CWASA-NC-2026-0488');
@@ -182,7 +211,7 @@ export default function App() {
   const [connectionEmail, setConnectionEmail] = useState('');
   const [propertyType, setPropertyType] = useState('Residential — single family');
   const [pipeDiameter, setPipeDiameter] = useState('¾″');
-  const [siteLocation, setSiteLocation] = useState('Halishahar Block C, Lane 4');
+  const [siteLocation, setSiteLocation] = useState('');
   const [coordinates, setCoordinates] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [photoUri, setPhotoUri] = useState('');
@@ -204,19 +233,15 @@ export default function App() {
 
   const t = useCallback((key: TranslationKey) => translate(language, key), [language]);
   const font = language === 'bn' ? 'Shurjo' : 'OpenSans';
-  const demoConsumption = demoBill.presentReading - demoBill.previousReading;
-  const demoCharge = demoConsumption * demoBill.ratePerUnit;
-  const demoVat = Math.round(demoCharge * 0.15);
-  const demoNetPayable = demoCharge + demoVat;
   const unreadCount = useMemo(() => notifications.filter((item) => !item.read).length, [notifications]);
-  const realCurrentBill = customerBills[0]?.billTotal != null ? Number(customerBills[0].billTotal) : null;
-  const currentBillAmount = realCurrentBill !== null && Number.isFinite(realCurrentBill)
-    ? Math.round(realCurrentBill)
-    : demoNetPayable;
-  const billVatAmount = realCurrentBill !== null && Number.isFinite(realCurrentBill)
-    ? Math.max(0, currentBillAmount - demoCharge)
-    : demoVat;
-  const displayAccountNo = customerSession?.accountNo ?? '070046SD';
+  const currentBill = customerBills.find((bill) => bill.status !== 'PAID' && bill.status !== 'CANCELLED') ?? null;
+  const latestBill = currentBill ?? customerBills[0] ?? null;
+  const billIsPaid = currentBillPaid || latestBill?.status === 'PAID';
+  const billIsOverdue = latestBill ? !billIsPaid && isPastDue(latestBill) : false;
+  const currentBillAmount = latestBill ? amountPayableToday(latestBill) : 0;
+  const displayAccountNo = profile?.accountNo ?? customerSession?.accountNo ?? '-';
+  const displayName = profile?.customerName ?? latestBill?.holderName ?? customerSession?.name ?? '';
+  const displayMeter = profile?.meterNo ?? latestBill?.meterNo ?? null;
 
   useEffect(() => {
     if (screen !== 'home') {
@@ -238,26 +263,51 @@ export default function App() {
     return () => animation.stop();
   }, [billCardShine, isGuest, screen]);
 
-  const loadCustomerBills = useCallback(async () => {
-    try {
-      const bills = await getCustomerBills();
-      setCustomerBills(bills);
-    } catch {
-      // Keep showing the demo figures if the customer API is unreachable.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (customerSession) {
-      loadCustomerBills();
-    }
-  }, [customerSession, loadCustomerBills]);
 
   const showNotice = (message: string) => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     setNotice(message);
     noticeTimer.current = setTimeout(() => setNotice(''), 4200);
   };
+
+  const loadAccountData = useCallback(async () => {
+    const [bills, me] = await Promise.allSettled([getCustomerBills(), getCustomerProfile()]);
+    if (bills.status === 'fulfilled') {
+      setCustomerBills(bills.value);
+      if (bills.value.length === 0 && getLastBillsNote()) showNotice(getLastBillsNote());
+    }
+    if (me.status === 'fulfilled') {
+      setProfile(me.value);
+      if (me.value.address) setSiteLocation(me.value.address);
+      if (me.value.mobileNo) setPaymentPhone(me.value.mobileNo);
+    }
+    const failure = bills.status === 'rejected' ? bills.reason : me.status === 'rejected' ? me.reason : null;
+    if (failure instanceof ApiRequestError && failure.status === 401) {
+      signOutCustomer();
+      setCustomerSession(null);
+      setScreen('sign-in');
+      showNotice('Your session has expired. Please sign in again.');
+    } else if (failure) {
+      showNotice('Could not load your account details. Please try again.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (customerSession && !isGuest) loadAccountData();
+  }, [customerSession, isGuest, loadAccountData]);
+
+  useEffect(() => {
+    if (!latestBill) return;
+    setNotifications((current) => current.some((item) => item.id === 1) ? current : [{
+      id: 1,
+      title: 'Your water bill is ready',
+      detail: `${formatTaka(amountPayableToday(latestBill))} · due ${formatBillDate(latestBill.dueDate)}`,
+      category: 'Bills',
+      read: false,
+      icon: '৳',
+      color: colors.purple,
+    }, ...current]);
+  }, [latestBill?.id]);
 
   const flipBillCard = () => {
     if (billCardTurning.current) return;
@@ -297,56 +347,68 @@ export default function App() {
     setScreen('public-services');
   };
 
-  const requestCode = async () => {
+  const signIn = async () => {
     if (!accountNumber.trim()) {
       showNotice('Enter your CWASA account number.');
       return;
     }
-    if (!/^01\d{9}$/.test(phone.replace(/\D/g, ''))) {
-      showNotice('Enter a valid 11-digit Bangladesh mobile number.');
+    if (!password) {
+      showNotice('Enter your password.');
       return;
     }
     setAuthBusy(true);
     try {
-      const result = await requestCustomerOtp(accountNumber.trim(), phone.replace(/\D/g, ''));
-      setScreen('verify');
-      showNotice(
-        result.devOtp
-          ? `Dev mode: your code is ${result.devOtp} (no SMS gateway configured yet).`
-          : 'A verification code has been sent.',
-      );
-    } catch (error) {
-      if (error instanceof ApiConnectionError) {
-        showNotice('Could not reach the CWASA server.');
-      } else if (error instanceof ApiRequestError && error.status === 404) {
-        showNotice('That account number and mobile number do not match.');
-      } else {
-        showNotice('Could not send a code. Please try again.');
-      }
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  const verifyCode = async () => {
-    if (!/^\d{6}$/.test(otp)) {
-      showNotice('Enter the 6-digit verification code.');
-      return;
-    }
-    setAuthBusy(true);
-    try {
-      const session = await verifyCustomerOtp(accountNumber.trim(), otp);
+      const session = await loginCustomer(accountNumber.trim(), password);
       setCustomerSession(session);
+      setPassword('');
       setIsGuest(false);
       setScreen('home');
       showNotice(t('welcomeBack'));
     } catch (error) {
       if (error instanceof ApiConnectionError) {
         showNotice('Could not reach the CWASA server.');
-      } else if (error instanceof ApiRequestError && error.status === 401) {
-        showNotice('That code is incorrect or has expired.');
+      } else if (error instanceof ApiRequestError && (error.status === 401 || error.status === 404)) {
+        showNotice('The account number or password is incorrect.');
       } else {
-        showNotice('Could not verify the code. Please try again.');
+        showNotice('Could not sign in. Please try again.');
+      }
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signUp = async () => {
+    const account = accountNumber.trim();
+    if (!account) {
+      showNotice('Enter your CWASA account number.');
+      return;
+    }
+    if (password.length < 8 || password.length > 72 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      showNotice('Use a password of 8 to 72 characters with at least one letter and one number.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      showNotice('The two passwords do not match.');
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      await registerCustomer(account, password);
+      setPassword('');
+      setConfirmPassword('');
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setScreen('sign-in');
+      showNotice('Your password has been created. Please sign in.');
+    } catch (error) {
+      if (error instanceof ApiConnectionError) {
+        showNotice('Could not reach the CWASA server.');
+      } else if (error instanceof ApiRequestError && error.status === 404) {
+        showNotice('We could not find that account number.');
+      } else if (error instanceof ApiRequestError && (error.status === 400 || error.status === 409)) {
+        showNotice(error.message);
+      } else {
+        showNotice('Could not create your account. Please try again.');
       }
     } finally {
       setAuthBusy(false);
@@ -501,10 +563,6 @@ export default function App() {
     showNotice(language === 'bn' ? 'পেমেন্টের ইতিহাস ডাউনলোড হয়েছে।' : 'Payment history downloaded.');
   };
 
-  if (!fontsLoaded) {
-    return <View style={styles.loading}><Text style={styles.loadingText}>CWASA</Text></View>;
-  }
-
   const TextLabel = ({ children, style, bold = false }: { children: React.ReactNode; style?: object; bold?: boolean }) => (
     <Text style={[
       styles.text,
@@ -522,13 +580,16 @@ export default function App() {
     </Text>
   );
 
-  const Field = ({
+  const FieldImpl = ({
     label,
     value,
     onChangeText,
     placeholder,
     keyboardType,
     multiline = false,
+    secure = false,
+    revealed = false,
+    onToggleReveal,
   }: {
     label: string;
     value: string;
@@ -536,20 +597,44 @@ export default function App() {
     placeholder?: string;
     keyboardType?: 'default' | 'numeric' | 'phone-pad' | 'email-address';
     multiline?: boolean;
+    secure?: boolean;
+    revealed?: boolean;
+    onToggleReveal?: () => void;
   }) => (
     <View style={styles.field}>
       <TextLabel style={styles.fieldLabel}>{label}</TextLabel>
-      <TextInput
-        accessibilityLabel={label}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.muted}
-        keyboardType={keyboardType ?? 'default'}
-        multiline={multiline}
-        textAlignVertical={multiline ? 'top' : 'center'}
-        style={[sharedStyles.input, multiline && styles.multilineInput, { fontFamily: fontFamilyForText(value || placeholder || label, false, language), fontSize: largeText ? 17 : 14 }]}
-      />
+      <View>
+        <TextInput
+          accessibilityLabel={label}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.muted}
+          keyboardType={keyboardType ?? 'default'}
+          multiline={multiline}
+          secureTextEntry={secure && !revealed}
+          autoCapitalize={secure ? 'none' : undefined}
+          autoCorrect={secure ? false : undefined}
+          textAlignVertical={multiline ? 'top' : 'center'}
+          style={[
+            sharedStyles.input,
+            multiline && styles.multilineInput,
+            secure && onToggleReveal ? { paddingRight: 46 } : null,
+            { fontFamily: fontFamilyForText(value || placeholder || label, false, language), fontSize: largeText ? 17 : 14 },
+          ]}
+        />
+        {secure && onToggleReveal ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={revealed ? 'Hide password' : 'Show password'}
+            onPress={onToggleReveal}
+            hitSlop={8}
+            style={{ position: 'absolute', right: 4, top: 0, bottom: 0, width: 40, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ fontSize: 18 }}>{revealed ? '🙈' : '👁'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 
@@ -567,7 +652,7 @@ export default function App() {
     </View>
   );
 
-  const Card = ({ children, style }: { children: React.ReactNode; style?: object }) => (
+  const CardImpl = ({ children, style }: { children: React.ReactNode; style?: object }) => (
     <View style={[sharedStyles.card, style]}>{children}</View>
   );
 
@@ -581,26 +666,104 @@ export default function App() {
     </View>
   );
 
+  const Field = useStableComponent(FieldImpl);
+  const Card = useStableComponent(CardImpl);
+
+  if (!fontsLoaded) {
+    return <View style={styles.loading}><Text style={styles.loadingText}>CWASA</Text></View>;
+  }
+
+  const breakdownRow = (label: string, value: string, bold = false) => (
+    <View key={label} style={styles.rowBetween}>
+      <TextLabel bold={bold}>{label}</TextLabel>
+      <TextLabel bold={bold}>{value}</TextLabel>
+    </View>
+  );
+
+  const renderBreakdown = (bill: BillDetail) => {
+    const overdue = isPastDue(bill);
+    const payableToday = amountPayableToday(bill);
+    return (
+      <Card>
+        <View style={styles.rowBetween}>
+          <TextLabel bold>{bill.billNumber || 'Water bill'}</TextLabel>
+          <TextLabel style={bill.status === 'PAID' ? styles.paidPill : styles.statusPill}>
+            {bill.status === 'PAID' ? t('paid') : overdue ? 'Overdue' : t('pending')}
+          </TextLabel>
+        </View>
+        {displayName ? <TextLabel bold>{displayName}</TextLabel> : null}
+        <TextLabel style={styles.helperText}>
+          Account {displayAccountNo} · Meter {bill.meterNo ?? displayMeter ?? '-'}
+        </TextLabel>
+        {(profile?.address ?? bill.address) ? <TextLabel style={styles.helperText}>{profile?.address ?? bill.address}</TextLabel> : null}
+        <TextLabel style={styles.helperText}>
+          Billing period {formatBillDate(bill.periodStart)} to {formatBillDate(bill.periodEnd)}
+        </TextLabel>
+        <View style={styles.amountLine}>
+          <TextLabel style={styles.billAmount}>{formatTaka(payableToday)}</TextLabel>
+          <TextLabel style={styles.helperText}>Due {formatBillDate(bill.dueDate)}</TextLabel>
+        </View>
+        <TextLabel style={styles.helperText}>Issued {formatBillDate(bill.issueDate)}</TextLabel>
+        <View style={styles.separator} />
+        {breakdownRow('Previous reading', `${bill.previousReading ?? '-'} m³`)}
+        {breakdownRow('Present reading', `${bill.currentReading ?? '-'} m³`)}
+        {breakdownRow(bill.isMinimumBilled ? 'Consumption (minimum billed)' : 'Consumption', `${bill.consumption ?? '-'} m³`)}
+        <View style={styles.separator} />
+        {breakdownRow(`Water charge${bill.ratePerM3 !== null ? ` @ ${formatTaka(bill.ratePerM3)}/m³` : ''}`, formatTaka(bill.waterCharge))}
+        {breakdownRow(`VAT${bill.vatPercentage !== null ? ` @ ${bill.vatPercentage}%` : ''}`, formatTaka(bill.vatAmount))}
+        {bill.additionalCharge !== 0 ? breakdownRow('Additional water charge', formatTaka(bill.additionalCharge)) : null}
+        {bill.arrears !== 0 ? breakdownRow('Arrears and adjustments', formatTaka(bill.arrears)) : null}
+        <View style={styles.separator} />
+        {breakdownRow(`Net payable by ${formatBillDate(bill.dueDate)}`, formatTaka(bill.netPayable), true)}
+        {bill.surcharges.length > 0 ? (
+          <View>
+            <View style={styles.separator} />
+            <TextLabel bold>If paid late</TextLabel>
+            <TextLabel style={styles.helperText}>A late payment charge is added to the water charge, before VAT.</TextLabel>
+            {bill.surcharges.map((step) => {
+              const current = overdue && formatBillDate(step.deadline) === formatBillDate(
+                bill.surcharges.find((item) => startOfDay(new Date(item.deadline)) >= startOfDay(new Date()))?.deadline
+                  ?? bill.surcharges[bill.surcharges.length - 1].deadline,
+              );
+              return breakdownRow(
+                `By ${formatBillDate(step.deadline)} · +${step.percentage}% (${formatTaka(step.surchargeAmount)})`,
+                formatTaka(step.totalPayable),
+                current,
+              );
+            })}
+          </View>
+        ) : null}
+      </Card>
+    );
+  };
+
+  const contentFrame = wide && screen !== 'home' ? { width: '100%' as const, maxWidth: 720, alignSelf: 'center' as const } : undefined;
+  const authScreen = screen === 'sign-in' || screen === 'sign-up';
+
   const header = (
-    <View style={[styles.header, wide && styles.headerWide]}>
+    <View style={[styles.header, wide && styles.headerWide, compact && { paddingHorizontal: 12, gap: 6 }]}>
       <Pressable onPress={() => setScreen('home')} accessibilityLabel={t('home')}>
         <Image source={require('./assets/cwasa-logo.png')} style={styles.headerLogo} resizeMode="contain" />
       </Pressable>
-      <View style={styles.brandText}>
+      <View style={[styles.brandText, { minWidth: 0 }]}>
         <TextLabel bold style={styles.brandName}>CHATTOGRAM WASA</TextLabel>
-        <TextLabel style={styles.headingSubtitle}>Digital Water Services</TextLabel>
+        {compact ? null : <TextLabel style={styles.headingSubtitle}>Digital Water Services</TextLabel>}
       </View>
-      <View style={styles.headerActions}>
-        <Pressable onPress={() => openPublicServices()} style={styles.publicInfoButton} accessibilityLabel={translateGuest(language, 'publicServices')}>
+      <View style={[styles.headerActions, compact && { gap: 6 }]}>
+        {authScreen ? null : (
+          <Pressable onPress={() => openPublicServices()} style={styles.publicInfoButton} accessibilityLabel={translateGuest(language, 'publicServices')}>
           <TextLabel style={styles.publicInfoText}>ⓘ</TextLabel>
         </Pressable>
+        )}
         <Pressable onPress={() => setLanguage((current) => current === 'en' ? 'bn' : 'en')} style={styles.languageButton} accessibilityLabel={t('language')}>
           <TextLabel style={styles.languageText}>{language === 'en' ? 'বাং' : 'EN'}</TextLabel>
         </Pressable>
-        <Pressable onPress={() => setScreen('notifications')} style={styles.notificationButton} accessibilityLabel={t('notifications')}>
+        {authScreen ? null : (
+          <Pressable onPress={() => setScreen('notifications')} style={styles.notificationButton} accessibilityLabel={t('notifications')}>
           <Text style={styles.notificationIcon}>🔔</Text>
           {unreadCount > 0 ? <View style={styles.notificationBadge}><Text style={styles.badgeText}>{unreadCount}</Text></View> : null}
         </Pressable>
+        )}
       </View>
     </View>
   );
@@ -650,34 +813,38 @@ export default function App() {
       case 'sign-in':
         return (
           <View style={styles.formScreen}>
-            <Heading title={t('continueWithMobile')} subtitle="Sign in to manage your CWASA services." />
+            <Heading title="Sign in" subtitle="Sign in to manage your CWASA services." />
             <Card>
               <Field label="Account number" value={accountNumber} onChangeText={setAccountNumber} placeholder="070046SD" />
-              <Field label={t('phoneNumber')} value={phone} onChangeText={setPhone} placeholder="01XXXXXXXXX" keyboardType="phone-pad" />
-              <ActionButton title={authBusy ? '...' : t('sendCode')} onPress={requestCode} fontFamily={font} />
+              <Field label="Password" value={password} onChangeText={setPassword} placeholder="Enter your password" secure revealed={showPassword} onToggleReveal={() => setShowPassword((v) => !v)} />
+              <ActionButton title={authBusy ? '...' : 'Sign in'} onPress={signIn} fontFamily={font} />
             </Card>
+            <LinkAction title="New here? Create an account" onPress={() => { setPassword(''); setShowPassword(false); setScreen('sign-up'); }} />
             <LinkAction title={t('exploreGuest')} onPress={enterGuestPortal} />
             <ActionButton title={t('back')} onPress={() => setScreen('welcome')} secondary fontFamily={font} />
           </View>
         );
-      case 'verify':
+      case 'sign-up':
         return (
           <View style={styles.formScreen}>
-            <Heading title={t('verification')} subtitle={`Code sent to ${phone}.`} />
+            <Heading title="Create account" subtitle="Use your CWASA account number to set a password." />
             <Card>
-              <Field label={t('verification')} value={otp} onChangeText={(value) => setOtp(value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" keyboardType="numeric" />
-              <TextLabel style={styles.helperText}>Enter the 6-digit code to continue.</TextLabel>
-              <ActionButton title={authBusy ? '...' : t('verify')} onPress={verifyCode} fontFamily={font} />
+              <Field label="Account number" value={accountNumber} onChangeText={setAccountNumber} placeholder="070046SD" />
+              <Field label="Password" value={password} onChangeText={setPassword} placeholder="At least 8 characters" secure revealed={showPassword} onToggleReveal={() => setShowPassword((v) => !v)} />
+              <Field label="Confirm password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Re-enter your password" secure revealed={showConfirmPassword} onToggleReveal={() => setShowConfirmPassword((v) => !v)} />
+              <TextLabel style={styles.helperText}>Use 8 to 72 characters with at least one letter and one number.</TextLabel>
+              <ActionButton title={authBusy ? '...' : 'Create account'} onPress={signUp} fontFamily={font} />
             </Card>
-            <Pressable onPress={requestCode}><TextLabel style={styles.linkText}>Resend code</TextLabel></Pressable>
+            <LinkAction title="Already have an account? Sign in" onPress={() => { setPassword(''); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); setScreen('sign-in'); }} />
+            <ActionButton title={t('back')} onPress={() => setScreen('welcome')} secondary fontFamily={font} />
           </View>
         );
       case 'home':
         return (
           <View>
-            <Heading title={`${t('welcomeBack')}, Anika`} />
+            <Heading title={`${t('welcomeBack')}, ${displayName || displayAccountNo}`} />
             <View style={[styles.dashboardRow, wide && styles.dashboardRowWide]}>
-              <View style={[styles.billCardViewport, wide && styles.billCardViewportWide]}>
+              <View style={[styles.billCardViewport, wide && styles.billCardViewportWide, !wide && { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' }, { height: billCardHeight }]}>
                 <Animated.View
                   style={[
                     styles.billCardFlipContainer,
@@ -692,39 +859,51 @@ export default function App() {
                     style={[styles.billReceiptFace, styles.billCardDetailsPressable]}
                   >
                     <View pointerEvents="none" style={styles.billReceiptContent}>
-                      <View style={styles.billReceiptHeader}>
-                        <View>
-                          <TextLabel bold style={styles.billReceiptTitle}>{language === 'bn' ? 'পানির বিল' : 'WATER BILL'}</TextLabel>
-                          <TextLabel style={styles.billReceiptMeta}>Regd. No. {demoBill.registrationNumber}</TextLabel>
-                        </View>
-                        <TextLabel style={styles.billReceiptPeriod}>AUG 2026</TextLabel>
-                      </View>
-                      <View style={styles.billReceiptDivider} />
-                      <View style={styles.billReceiptRow}>
-                        <TextLabel style={styles.billReceiptLabel}>Previous reading · {demoBill.previousReadingDate}</TextLabel>
-                        <TextLabel bold style={styles.billReceiptValue}>{demoBill.previousReading} m³</TextLabel>
-                      </View>
-                      <View style={styles.billReceiptRow}>
-                        <TextLabel style={styles.billReceiptLabel}>Present reading · {demoBill.presentReadingDate}</TextLabel>
-                        <TextLabel bold style={styles.billReceiptValue}>{demoBill.presentReading} m³</TextLabel>
-                      </View>
-                      <View style={styles.billReceiptRow}>
-                        <TextLabel style={styles.billReceiptLabel}>Consumption · {demoBill.readingDays} days</TextLabel>
-                        <TextLabel bold style={styles.billReceiptValue}>{demoConsumption} m³</TextLabel>
-                      </View>
-                      <View style={styles.billReceiptDivider} />
-                      <View style={styles.billReceiptRow}>
-                        <TextLabel style={styles.billReceiptLabel}>Amount @ ৳{demoBill.ratePerUnit.toFixed(2)}/m³</TextLabel>
-                        <TextLabel style={styles.billReceiptValue}>৳{demoCharge.toLocaleString()}</TextLabel>
-                      </View>
-                      <View style={styles.billReceiptRow}>
-                        <TextLabel style={styles.billReceiptLabel}>VAT @ 15%</TextLabel>
-                        <TextLabel style={styles.billReceiptValue}>৳{billVatAmount.toLocaleString()}</TextLabel>
-                      </View>
-                      <View style={styles.billReceiptTotal}>
-                        <TextLabel bold style={styles.billReceiptTotalLabel}>NET PAYABLE</TextLabel>
-                        <TextLabel bold style={styles.billReceiptTotalAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel>
-                      </View>
+                      {latestBill ? (
+                        <>
+                          <View style={styles.billReceiptHeader}>
+                            <View>
+                              <TextLabel bold style={styles.billReceiptTitle}>{language === 'bn' ? 'পানির বিল' : 'WATER BILL'}</TextLabel>
+                              <TextLabel style={styles.billReceiptMeta}>Bill No. {latestBill.billNumber || '-'}</TextLabel>
+                            </View>
+                            <TextLabel style={styles.billReceiptPeriod}>{latestBill.periodEnd ? new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' }).format(new Date(latestBill.periodEnd)).toUpperCase() : ''}</TextLabel>
+                          </View>
+                          <View style={styles.billReceiptDivider} />
+                          <View style={styles.billReceiptRow}>
+                            <TextLabel style={styles.billReceiptLabel}>Previous reading</TextLabel>
+                            <TextLabel bold style={styles.billReceiptValue}>{latestBill.previousReading ?? '-'} m³</TextLabel>
+                          </View>
+                          <View style={styles.billReceiptRow}>
+                            <TextLabel style={styles.billReceiptLabel}>Present reading</TextLabel>
+                            <TextLabel bold style={styles.billReceiptValue}>{latestBill.currentReading ?? '-'} m³</TextLabel>
+                          </View>
+                          <View style={styles.billReceiptRow}>
+                            <TextLabel style={styles.billReceiptLabel}>Consumption</TextLabel>
+                            <TextLabel bold style={styles.billReceiptValue}>{latestBill.consumption ?? '-'} m³</TextLabel>
+                          </View>
+                          <View style={styles.billReceiptDivider} />
+                          <View style={styles.billReceiptRow}>
+                            <TextLabel style={styles.billReceiptLabel}>Water charge{latestBill.ratePerM3 !== null ? ` @ ${formatTaka(latestBill.ratePerM3)}/m³` : ''}</TextLabel>
+                            <TextLabel style={styles.billReceiptValue}>{formatTaka(latestBill.waterCharge)}</TextLabel>
+                          </View>
+                          <View style={styles.billReceiptRow}>
+                            <TextLabel style={styles.billReceiptLabel}>VAT{latestBill.vatPercentage !== null ? ` @ ${latestBill.vatPercentage}%` : ''}</TextLabel>
+                            <TextLabel style={styles.billReceiptValue}>{formatTaka(latestBill.vatAmount)}</TextLabel>
+                          </View>
+                          {latestBill.arrears + latestBill.adjustments !== 0 ? (
+                            <View style={styles.billReceiptRow}>
+                              <TextLabel style={styles.billReceiptLabel}>Arrears and adjustments</TextLabel>
+                              <TextLabel style={styles.billReceiptValue}>{formatTaka(latestBill.arrears + latestBill.adjustments)}</TextLabel>
+                            </View>
+                          ) : null}
+                          <View style={styles.billReceiptTotal}>
+                            <TextLabel bold style={styles.billReceiptTotalLabel}>NET PAYABLE</TextLabel>
+                            <TextLabel bold style={styles.billReceiptTotalAmount}>{formatTaka(latestBill.netPayable)}</TextLabel>
+                          </View>
+                        </>
+                      ) : (
+                        <TextLabel style={styles.billReceiptLabel}>Your bill will appear here once it is issued.</TextLabel>
+                      )}
                     </View>
                   </Pressable>
                 ) : (
@@ -740,24 +919,25 @@ export default function App() {
                       <Animated.View style={[styles.billShine, { transform: [{ translateX: billCardShine.interpolate({ inputRange: [0, 1], outputRange: [-320, 620] }) }, { rotate: '22deg' }] }]} />
                       <View style={styles.heroTop}>
                         <TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel>
-                        <TextLabel style={styles.heroTag}>{t(currentBillPaid ? 'paid' : 'pending')}</TextLabel>
+                        <TextLabel style={styles.heroTag}>{billIsPaid ? t('paid') : billIsOverdue ? 'Overdue' : t('pending')}</TextLabel>
                       </View>
                       <View style={styles.billFrontMiddle}>
                         <View>
-                          <TextLabel bold style={styles.heroAmount}>{currentBillPaid ? '৳ 0' : `৳ ${currentBillAmount.toLocaleString()}`}</TextLabel>
-                          <TextLabel style={styles.heroDue}>{currentBillPaid ? 'Paid in full' : `Due 15 Sep 2026 `}</TextLabel>
+                          <TextLabel bold style={styles.heroAmount}>{!latestBill ? '৳ -' : billIsPaid ? '৳ 0' : `৳ ${Math.round(currentBillAmount).toLocaleString()}`}</TextLabel>
+                          <TextLabel style={styles.heroDue}>{!latestBill ? 'No bill available yet' : billIsPaid ? 'Paid in full' : `Due ${formatBillDate(latestBill.dueDate)}`}</TextLabel>
                           <TextLabel style={styles.billFlipHint}>{language === 'bn' ? 'বিলের বিস্তারিত দেখতে ট্যাপ করুন' : 'Tap card to view breakdown'}　↻</TextLabel>
                         </View>
                         <View style={styles.billCurrencySymbol}><TextLabel bold style={styles.billCurrencyText}>৳</TextLabel></View>
                       </View>
                       <View style={styles.heroBottom}>
-                        <TextLabel style={styles.heroAccount}>Account {displayAccountNo} · Bill 08/2026</TextLabel>
+                        <TextLabel style={styles.heroAccount}>Account {displayAccountNo}{latestBill?.billNumber ? ` · Bill ${latestBill.billNumber}` : ''}</TextLabel>
                       </View>
                     </View>
                     <View style={styles.billPayButton}>
                       <ActionButton
-                        title={currentBillPaid ? t('transactionHistory') : t('payNow')}
-                        onPress={() => { if (currentBillPaid) setScreen('history'); else setScreen('bill'); }}
+                        title={billIsPaid ? t('transactionHistory') : t('payNow')}
+                        onPress={() => { if (billIsPaid) setScreen('history'); else setScreen('bill'); }}
+                        disabled={!latestBill}
                         fontFamily={font}
                         compact
                       />
@@ -770,7 +950,7 @@ export default function App() {
                 <SectionTitle title={t('services')} />
                 <View style={styles.tileGrid}>
                   {serviceTiles.slice(0, 4).map((tile) => (
-                    <Pressable key={tile.title} onPress={() => setScreen(tile.screen)} style={styles.serviceTile}>
+                    <Pressable key={tile.title} onPress={() => setScreen(tile.screen)} style={[styles.serviceTile, veryCompact && { width: '48%' }]}>
                       <View style={[styles.tileIcon, { backgroundColor: `${tile.color}15` }]}><TextLabel bold style={{ color: tile.color, fontSize: 20 }}>{tile.icon}</TextLabel></View>
                       <TextLabel style={styles.tileLabel}>{t(tile.title)}</TextLabel>
                     </Pressable>
@@ -817,26 +997,16 @@ export default function App() {
             </View>
             {billFilter === 'paid' ? (
               <View>
+                {customerBills.filter((bill) => bill.status === 'PAID').map((bill) => renderBreakdown(bill))}
+                {customerBills.every((bill) => bill.status !== 'PAID') && payments.length === 0 ? <Card><TextLabel style={styles.helperText}>No paid bills yet.</TextLabel></Card> : null}
                 {payments.map((payment) => <Card key={payment.id}><View style={styles.rowBetween}><TextLabel bold>{payment.date} water bill</TextLabel><TextLabel style={styles.paidPill}>{t('paid')}</TextLabel></View><TextLabel style={styles.helperText}>{payment.id} · {payment.method}</TextLabel><View style={styles.rowBetween}><TextLabel>{t('totalPayable')}</TextLabel><TextLabel bold>৳{payment.amount.toLocaleString()}</TextLabel></View></Card>)}
                 <ActionButton title={t('paymentHistory')} onPress={() => setScreen('history')} secondary fontFamily={font} />
               </View>
-            ) : currentBillPaid ? (
-              <View><Card><TextLabel bold>{language === 'bn' ? 'কোনো বকেয়া বিল নেই' : 'No bills due'}</TextLabel><TextLabel style={styles.helperText}>{language === 'bn' ? 'বর্তমান বিল সম্পূর্ণ পরিশোধিত।' : 'Your current bill is paid in full.'}</TextLabel><ActionButton title={t('paidBills')} onPress={() => setBillFilter('paid')} secondary fontFamily={font} /></Card></View>
+            ) : billIsPaid || !latestBill ? (
+              <View><Card><TextLabel bold>{!latestBill ? 'No bill available yet' : (language === 'bn' ? 'কোনো বকেয়া বিল নেই' : 'No bills due')}</TextLabel><TextLabel style={styles.helperText}>{!latestBill ? 'Your bill will appear here once it has been issued.' : (language === 'bn' ? 'বর্তমান বিল সম্পূর্ণ পরিশোধিত।' : 'Your current bill is paid in full.')}</TextLabel><ActionButton title={t('paidBills')} onPress={() => setBillFilter('paid')} secondary fontFamily={font} /></Card></View>
             ) : (
               <>
-                <Card>
-                  <View style={styles.rowBetween}><TextLabel bold>AUG 2026</TextLabel><TextLabel style={styles.statusPill}>{t('pending')}</TextLabel></View>
-                  <TextLabel style={styles.helperText}>Account {displayAccountNo} · Meter 443920</TextLabel>
-                  <View style={styles.amountLine}><TextLabel style={styles.billAmount}>৳{currentBillAmount.toLocaleString()}</TextLabel><TextLabel style={styles.helperText}>Due 15 Sep 2026</TextLabel></View>
-                  <View style={styles.separator} />
-                  <View style={styles.rowBetween}><TextLabel>Previous reading · {demoBill.previousReadingDate}</TextLabel><TextLabel>{demoBill.previousReading} m³</TextLabel></View>
-                  <View style={styles.rowBetween}><TextLabel>Present reading · {demoBill.presentReadingDate}</TextLabel><TextLabel>{demoBill.presentReading} m³</TextLabel></View>
-                  <View style={styles.rowBetween}><TextLabel>Consumption · {demoBill.readingDays} days</TextLabel><TextLabel>{demoConsumption} m³</TextLabel></View>
-                  <View style={styles.rowBetween}><TextLabel>Amount @ ৳{demoBill.ratePerUnit.toFixed(2)}/m³</TextLabel><TextLabel>৳{demoCharge.toLocaleString()}</TextLabel></View>
-                  <View style={styles.rowBetween}><TextLabel>VAT @ 15%</TextLabel><TextLabel>৳{billVatAmount.toLocaleString()}</TextLabel></View>
-                  <View style={styles.separator} />
-                  <View style={styles.rowBetween}><TextLabel bold>{t('totalPayable')}</TextLabel><TextLabel bold style={styles.totalValue}>৳{currentBillAmount.toLocaleString()}</TextLabel></View>
-                </Card>
+                {renderBreakdown(latestBill)}
                 <Card>
                   <SectionTitle title={t('paymentMethod')} />
                   <View style={styles.paymentMethodGrid}>
@@ -860,15 +1030,16 @@ export default function App() {
           <View>
             <Heading title={t('paymentHistory')} subtitle="Your recent water bill payments." />
             <Card style={styles.balanceCard}>
-              <View style={styles.rowBetween}><View><TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel><TextLabel bold style={styles.heroAmount}>৳14,210</TextLabel></View><ActionButton title={t('export')} onPress={exportHistory} secondary fontFamily={font} compact /></View>
-              <TextLabel style={styles.heroEyebrow}>070046SD · Updated today</TextLabel>
+              <View style={styles.rowBetween}><View><TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel><TextLabel bold style={styles.heroAmount}>{latestBill ? formatTaka(billIsPaid ? 0 : currentBillAmount) : '৳ -'}</TextLabel></View><ActionButton title={t('export')} onPress={exportHistory} secondary fontFamily={font} compact /></View>
+              <TextLabel style={styles.heroEyebrow}>{displayAccountNo}</TextLabel>
             </Card>
+            {payments.length === 0 ? <Card><TextLabel style={styles.helperText}>No payments yet.</TextLabel></Card> : null}
             {payments.map((payment) => (
               <Card key={payment.id} style={styles.historyCard}>
                 <View style={styles.historyIcon}><TextLabel bold style={styles.historyCheck}>✓</TextLabel></View>
                 <View style={styles.historyDetails}>
                   <View style={styles.rowBetween}><TextLabel bold>{payment.date} water bill</TextLabel><TextLabel style={styles.paidPill}>{t('paid')}</TextLabel></View>
-                  <TextLabel style={styles.helperText}>070046SD · {payment.id}</TextLabel>
+                  <TextLabel style={styles.helperText}>{displayAccountNo} · {payment.id}</TextLabel>
                   <View style={styles.rowBetween}><TextLabel style={styles.helperText}>{payment.method}</TextLabel><TextLabel bold>৳{payment.amount.toLocaleString()}</TextLabel></View>
                   <LinkAction title="View receipt" onPress={() => showNotice(`${t('paymentReference')}: ${payment.id}`)} />
                 </View>
@@ -998,7 +1169,7 @@ export default function App() {
               <Pressable key={item.id} onPress={() => { setNotifications((current) => current.map((entry) => entry.id === item.id ? { ...entry, read: true } : entry)); if (item.category === 'Bills') setScreen('bill'); else if (item.category === 'Service') setScreen('complaints'); else showNotice(item.detail); }}>
                 <Card style={[styles.notificationCard, !item.read && styles.notificationUnread]}>
                   <View style={[styles.notificationItemIcon, { backgroundColor: `${item.color}17` }]}><TextLabel bold style={{ color: item.color }}>{item.icon}</TextLabel></View>
-                  <View style={styles.notificationItemContent}><View style={styles.rowBetween}><TextLabel bold>{item.title}</TextLabel><TextLabel style={styles.helperText}>09:42</TextLabel></View><TextLabel style={styles.helperText}>{item.detail}</TextLabel></View>
+                  <View style={styles.notificationItemContent}><View style={styles.rowBetween}><TextLabel bold>{item.title}</TextLabel></View><TextLabel style={styles.helperText}>{item.detail}</TextLabel></View>
                   {!item.read ? <View style={styles.unreadDot} /> : null}
                 </Card>
               </Pressable>
@@ -1038,28 +1209,31 @@ export default function App() {
             <Heading title={t('accountProfile')} subtitle="Manage your customer profile and preferences." />
             <Card>
               <View style={styles.profileHeader}>
-                <View style={styles.avatar}><TextLabel bold style={styles.avatarText}>AR</TextLabel></View>
+                <View style={styles.avatar}><TextLabel bold style={styles.avatarText}>{(displayName || displayAccountNo).split(/\s+/).map((word) => word.charAt(0)).slice(0, 2).join('').toUpperCase()}</TextLabel></View>
                 <View style={styles.profileDetails}>
-                  {profileEditing ? <TextInput value={connectionName} onChangeText={setConnectionName} style={[sharedStyles.input, styles.nameInput, { fontFamily: fontFamilyForText(connectionName, true, language) }]} /> : <TextLabel bold style={styles.profileName}>{connectionName}</TextLabel>}
-                  <TextLabel style={styles.helperText}>+880 {phone || '1712 345 678'}</TextLabel>
+                  <TextLabel bold style={styles.profileName}>{displayName || displayAccountNo}</TextLabel>
+                  <TextLabel style={styles.helperText}>{profile?.mobileNo ?? 'Mobile number not on file'}</TextLabel>
                   <TextLabel style={styles.helperText}>Account {displayAccountNo}</TextLabel>
+                  <TextLabel style={styles.helperText}>Meter {displayMeter ?? '-'}</TextLabel>
                 </View>
-                <Pressable onPress={() => { setProfileEditing((value) => !value); showNotice(profileEditing ? t('save') : t('edit')); }}><TextLabel style={styles.linkText}>{profileEditing ? t('save') : t('edit')}</TextLabel></Pressable>
               </View>
               <View style={styles.profileStats}>
-                {[['11', 'Bills paid'], ['3', 'Complaints'], ['2', 'Connections']].map(([value, label]) => <View key={label} style={styles.profileStat}><TextLabel bold style={styles.profileStatNumber}>{value}</TextLabel><TextLabel style={styles.helperText}>{label}</TextLabel></View>)}
+                {[
+                  [String(customerBills.length), 'Bills'],
+                  [String(customerBills.filter((bill) => bill.status === 'PAID').length), 'Paid'],
+                  [String(customerBills.filter((bill) => bill.status !== 'PAID' && bill.status !== 'CANCELLED').length), 'Due'],
+                ].map(([value, label]) => <View key={label} style={styles.profileStat}><TextLabel bold style={styles.profileStatNumber}>{value}</TextLabel><TextLabel style={styles.helperText}>{label}</TextLabel></View>)}
               </View>
             </Card>
             <SectionTitle title={t('myConnections')} />
             <Card style={styles.connectionCard}>
               <View style={styles.connectionIndicator} />
-              <View style={styles.connectionInfo}><TextLabel bold>Halishahar — primary</TextLabel><TextLabel style={styles.helperText}>Domestic  ·  042585SD</TextLabel></View>
-              <TextLabel style={styles.paidPill}>{t('inProgress')}</TextLabel>
-            </Card>
-            <Card style={styles.connectionCard}>
-              <View style={[styles.connectionIndicator, styles.connectionPending]} />
-              <View style={styles.connectionInfo}><TextLabel bold>Agrabad — shop</TextLabel><TextLabel style={styles.helperText}>Commercial · 070046SD</TextLabel></View>
-              <TextLabel style={styles.pendingPill}>{t('pending')}</TextLabel>
+              <View style={styles.connectionInfo}>
+                <TextLabel bold>{profile?.address ?? 'Service address not on file'}</TextLabel>
+                <TextLabel style={styles.helperText}>
+                  {[profile?.propertyType, profile?.wardNo ? `Ward ${profile.wardNo}` : null, profile?.connectionSize ? `${profile.connectionSize} connection` : null].filter(Boolean).join(' · ') || `Account ${displayAccountNo}`}
+                </TextLabel>
+              </View>
             </Card>
             <Card>
               <SectionTitle title={t('preferences')} />
@@ -1069,7 +1243,7 @@ export default function App() {
               <PreferenceToggle title={t('smsFallback')} value={smsFallback} onChange={setSmsFallback} />
               <View style={styles.separator} />
               <ActionButton title={translateGuest(language, 'publicServices')} onPress={() => openPublicServices()} secondary fontFamily={font} />
-              <ActionButton title={language === 'bn' ? 'লগ আউট' : 'Sign out'} onPress={() => { signOutCustomer(); setCustomerSession(null); setCustomerBills([]); setIsGuest(false); setScreen('welcome'); }} secondary fontFamily={font} />
+              <ActionButton title={language === 'bn' ? 'লগ আউট' : 'Sign out'} onPress={() => { signOutCustomer(); setPassword(''); setCustomerSession(null); setCustomerBills([]); setProfile(null); setNotifications([]); setSiteLocation(''); setPaymentPhone(''); setIsGuest(false); setScreen('welcome'); }} secondary fontFamily={font} />
             </Card>
           </View>
         );
@@ -1100,7 +1274,9 @@ export default function App() {
     return (
       <View style={styles.welcomeRoot}>
         <StatusBar style="light" />
-        {screenContent}
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+          {screenContent}
+        </ScrollView>
         {notice ? <TextLabel style={styles.notice}>{notice}</TextLabel> : null}
       </View>
     );
@@ -1110,7 +1286,7 @@ export default function App() {
     return (
       <View style={styles.guestRoot}>
         <StatusBar style="dark" />
-        <View style={[styles.guestShell, wide && styles.appShellWide]}>
+        <View style={[styles.guestShell, tablet && !wide && { maxWidth: 720 }, wide && styles.appShellWide]}>
           <View style={[styles.header, styles.guestHeader, wide && styles.headerWide]}>
             <Pressable onPress={() => setGuestSection('home')} accessibilityLabel={translateGuest(language, 'guestWelcome')}>
               <Image source={require('./assets/cwasa-logo.png')} style={styles.headerLogo} resizeMode="contain" />
@@ -1129,7 +1305,7 @@ export default function App() {
           </View>
           <ScrollView contentContainerStyle={[styles.content, wide && styles.contentWide]} keyboardShouldPersistTaps="handled">
             {notice ? <Pressable onPress={() => setNotice('')}><TextLabel style={styles.notice}>{notice}　×</TextLabel></Pressable> : null}
-            {screenContent}
+            <View style={contentFrame}>{screenContent}</View>
             <View style={styles.footer}>
             </View>
           </ScrollView>
@@ -1141,15 +1317,15 @@ export default function App() {
   return (
     <View style={styles.appRoot}>
       <StatusBar style="dark" />
-      <View style={[styles.appShell, wide && styles.appShellWide]}>
+      <View style={[styles.appShell, tablet && !wide && { maxWidth: 720 }, wide && styles.appShellWide]}>
         {header}
         <ScrollView contentContainerStyle={[styles.content, wide && styles.contentWide]} keyboardShouldPersistTaps="handled">
           {notice ? <Pressable onPress={() => setNotice('')}><TextLabel style={styles.notice}>{notice}　×</TextLabel></Pressable> : null}
-          {screenContent}
+          <View style={contentFrame}>{screenContent}</View>
           <View style={styles.footer}>
           </View>
         </ScrollView>
-        {bottomNav}
+        {authScreen ? null : bottomNav}
       </View>
       {cameraOpen ? (
         <View style={styles.cameraOverlay}>
