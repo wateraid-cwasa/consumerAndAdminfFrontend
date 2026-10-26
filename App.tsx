@@ -793,10 +793,10 @@ export default function App() {
   const bottomNav = (
     <View style={styles.bottomNav}>
       {([
-        ['home', '⌂', t('home')],
+        ['home', '🏠︎', t('home')],
         ['history', '◷', t('history')],
-        ['support', '◎', t('support')],
-        ['account', '♙', t('account')],
+        ['support', '⍝', t('support')],
+        ['account', '☻', t('account')],
       ] as [Screen, string, string][]).map(([target, icon, label]) => (
         <Pressable key={target} onPress={() => setScreen(target)} style={styles.navItem} accessibilityRole="tab" accessibilityState={{ selected: screen === target }}>
           <TextLabel bold style={[styles.navIcon, (screen === target || (target === 'support' && ['complaint-form', 'complaints', 'new-connection', 'application'].includes(screen))) && styles.navSelected]}>{icon}</TextLabel>
@@ -1075,7 +1075,7 @@ export default function App() {
             <Heading title={t('paymentHistory')} subtitle="Your recent water bill payments." />
             <Card style={styles.balanceCard}>
               <View style={styles.rowBetween}><View><TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel><TextLabel bold style={styles.heroAmount}>{latestBill ? formatTaka(billIsPaid ? 0 : currentBillAmount) : '৳ -'}</TextLabel></View><ActionButton title={t('export')} onPress={exportHistory} secondary fontFamily={font} compact /></View>
-              <TextLabel style={styles.heroEyebrow}>{displayAccountNo}</TextLabel>
+              <TextLabel style={styles.heroEyebrow}>Account :  {displayAccountNo}</TextLabel>
             </Card>
             {payments.length === 0 ? <Card><TextLabel style={styles.helperText}>No payments yet.</TextLabel></Card> : null}
             {payments.map((payment) => (
