@@ -177,20 +177,20 @@ export default function App() {
   const compact = width < 380;
   const veryCompact = width < 340;
   const billCardHeight = compact ? 312 : 272;
-  const [screen, setScreen] = useState<Screen>('welcome');
+  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(
+    () => (Platform.OS === 'web' ? getStoredCustomerSession() : null),
+  );
+  const [screen, setScreen] = useState<Screen>(() => customerSession ? 'home' : 'welcome');
   const [isGuest, setIsGuest] = useState(false);
   const [language, setLanguage] = useState<Language>('en');
   const [guestSection, setGuestSection] = useState<GuestSection>('home');
   const [notice, setNotice] = useState('');
-  const [phone, setPhone] = useState('');
+  const [registrationContact, setRegistrationContact] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [accountNumber, setAccountNumber] = useState('');
-  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(
-    () => (Platform.OS === 'web' ? getStoredCustomerSession() : null),
-  );
   const [customerBills, setCustomerBills] = useState<BillDetail[]>([]);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
@@ -337,7 +337,6 @@ export default function App() {
 
   const beginSignIn = () => {
     setIsGuest(false);
-    setPhone('');
     setScreen('sign-in');
   };
 
@@ -379,9 +378,31 @@ export default function App() {
 
   const signUp = async () => {
     const account = accountNumber.trim();
+    const contact = registrationContact.trim();
     if (!account) {
       showNotice('Enter your CWASA account number.');
       return;
+    }
+    if (!contact) {
+      showNotice('Enter your email address or phone number.');
+      return;
+    }
+    let verificationContact: { email: string } | { phone: string };
+    if (contact.includes('@')) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
+        showNotice('Enter a valid email address or phone number.');
+        return;
+      }
+      verificationContact = { email: contact };
+    } else {
+      let digits = contact.replace(/\D/g, '');
+      if (digits.startsWith('880')) digits = digits.slice(3);
+      if (digits.startsWith('0')) digits = digits.slice(1);
+      if (!/^1\d{9}$/.test(digits)) {
+        showNotice('Enter a valid Bangladesh mobile number beginning with 01, or use your registered email.');
+        return;
+      }
+      verificationContact = { phone: `0${digits}` };
     }
     if (password.length < 8 || password.length > 72 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
       showNotice('Use a password of 8 to 72 characters with at least one letter and one number.');
@@ -393,9 +414,10 @@ export default function App() {
     }
     setAuthBusy(true);
     try {
-      await registerCustomer(account, password);
+      await registerCustomer(account, verificationContact, password);
       setPassword('');
       setConfirmPassword('');
+      setRegistrationContact('');
       setShowPassword(false);
       setShowConfirmPassword(false);
       setScreen('sign-in');
@@ -404,7 +426,7 @@ export default function App() {
       if (error instanceof ApiConnectionError) {
         showNotice('Could not reach the CWASA server.');
       } else if (error instanceof ApiRequestError && error.status === 404) {
-        showNotice('We could not find that account number.');
+        showNotice('We could not verify that account with the supplied email or phone number.');
       } else if (error instanceof ApiRequestError && (error.status === 400 || error.status === 409)) {
         showNotice(error.message);
       } else {
@@ -631,7 +653,7 @@ export default function App() {
             hitSlop={8}
             style={{ position: 'absolute', right: 4, top: 0, bottom: 0, width: 40, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Text style={{ fontSize: 18 }}>{revealed ? '🙈' : '👁'}</Text>
+            <Text style={{ fontSize: 18 }}>{revealed ? '🔒' : '👁'}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -827,9 +849,31 @@ export default function App() {
       case 'sign-up':
         return (
           <View style={styles.formScreen}>
-            <Heading title="Create account" subtitle="Use your CWASA account number to set a password." />
+            <Heading title="Create account" subtitle="Register with you CWASA account number." />
             <Card>
               <Field label="Account number" value={accountNumber} onChangeText={setAccountNumber} placeholder="070046SD" />
+              <View style={styles.field}>
+                <TextLabel style={styles.fieldLabel}>Email or phone</TextLabel>
+                <View style={{ flexDirection: 'row', alignItems: 'center', borderColor: colors.border, borderWidth: 1, borderRadius: 11, backgroundColor: colors.white, minHeight: 46 }}>
+                  {!registrationContact.includes('@') && !/^\+?880/.test(registrationContact) ? (
+                    <TextLabel style={{ color: colors.ink, paddingLeft: 13, paddingRight: 8 }}>BD +880</TextLabel>
+                  ) : null}
+                  <TextInput
+                    accessibilityLabel="Email or phone"
+                    value={registrationContact}
+                    onChangeText={setRegistrationContact}
+                    placeholder="Email address or mobile number"
+                    placeholderTextColor={colors.muted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[
+                      sharedStyles.input,
+                      { flex: 1, minHeight: 44, borderWidth: 0, paddingLeft: 5, fontFamily: fontFamilyForText(registrationContact || 'Email or phone', false, language), fontSize: largeText ? 17 : 14 },
+                    ]}
+                  />
+                </View>
+                <TextLabel style={styles.helperText}>Enter a Bangladesh mobile number beginning with 01, or enter the 10 digits after BD +880. You can also enter an email address.</TextLabel>
+              </View>
               <Field label="Password" value={password} onChangeText={setPassword} placeholder="At least 8 characters" secure revealed={showPassword} onToggleReveal={() => setShowPassword((v) => !v)} />
               <Field label="Confirm password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Re-enter your password" secure revealed={showConfirmPassword} onToggleReveal={() => setShowConfirmPassword((v) => !v)} />
               <TextLabel style={styles.helperText}>Use 8 to 72 characters with at least one letter and one number.</TextLabel>

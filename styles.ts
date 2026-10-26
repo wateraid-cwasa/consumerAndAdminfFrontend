@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   billCurrencyText: { color: colors.white, fontSize: 34 },
-  billFlipHint: { color: "#D6E8FF", fontSize: 12, marginTop: 6 },
+  billFlipHint: { color: "rgb(252, 254, 255)", fontSize: 12, marginTop: 6 },
   billShine: {
     position: "absolute",
     top: -30,

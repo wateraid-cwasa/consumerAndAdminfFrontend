@@ -383,10 +383,14 @@ export async function loginCustomer(accountNo: string, password: string): Promis
 }
 
 // Creates the customer's password. The server checks that the account exists in the CWASA records.
-export async function registerCustomer(accountNo: string, password: string): Promise<void> {
+export async function registerCustomer(
+  accountNo: string,
+  verificationContact: { email: string } | { phone: string },
+  password: string,
+): Promise<void> {
   await rawRequest<unknown>('/customer/set-password', {
     method: 'POST',
-    body: { accountNo, password },
+    body: { accountNo, ...verificationContact, password },
   });
 }
 
