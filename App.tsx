@@ -89,7 +89,7 @@ function formatBillDate(value: string | null): string {
 }
 
 function formatTaka(value: number): string {
-  return `৳${Math.round(value).toLocaleString('en-US')}`;
+  return `৳${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function startOfDay(value: Date): number {
@@ -793,9 +793,9 @@ export default function App() {
   const bottomNav = (
     <View style={styles.bottomNav}>
       {([
-        ['home', '🏠︎', t('home')],
+        ['home', '𖠿', t('home')],
         ['history', '◷', t('history')],
-        ['support', '⍝', t('support')],
+        ['support', '✆', t('support')],
         ['account', '☻', t('account')],
       ] as [Screen, string, string][]).map(([target, icon, label]) => (
         <Pressable key={target} onPress={() => setScreen(target)} style={styles.navItem} accessibilityRole="tab" accessibilityState={{ selected: screen === target }}>
@@ -967,7 +967,7 @@ export default function App() {
                       </View>
                       <View style={styles.billFrontMiddle}>
                         <View>
-                          <TextLabel bold style={styles.heroAmount}>{!latestBill ? '৳ -' : billIsPaid ? '৳ 0' : `৳ ${Math.round(currentBillAmount).toLocaleString()}`}</TextLabel>
+                          <TextLabel bold style={styles.heroAmount}>{!latestBill ? '৳ -' : formatTaka(billIsPaid ? 0 : currentBillAmount)}</TextLabel>
                           <TextLabel style={styles.heroDue}>{!latestBill ? 'No bill available yet' : billIsPaid ? 'Paid in full' : `Due ${formatBillDate(latestBill.dueDate)}`}</TextLabel>
                           <TextLabel style={styles.billFlipHint}>{language === 'bn' ? 'বিলের বিস্তারিত দেখতে ট্যাপ করুন' : 'Tap card to view breakdown'}　↻</TextLabel>
                         </View>
@@ -1026,7 +1026,7 @@ export default function App() {
             <Card>
               <View style={styles.rowBetween}><TextLabel style={styles.helperText}>{t('paymentReference')}</TextLabel><TextLabel bold>{payments[0]?.id}</TextLabel></View>
               <View style={styles.separator} />
-              <View style={styles.rowBetween}><TextLabel>{t('totalPayable')}</TextLabel><TextLabel bold style={styles.totalValue}>৳{payments[0]?.amount.toLocaleString() ?? currentBillAmount.toLocaleString()}</TextLabel></View>
+              <View style={styles.rowBetween}><TextLabel>{t('totalPayable')}</TextLabel><TextLabel bold style={styles.totalValue}>{formatTaka(payments[0]?.amount ?? currentBillAmount)}</TextLabel></View>
               <View style={styles.rowBetween}><TextLabel style={styles.helperText}>{t('paymentMethod')}</TextLabel><TextLabel>{paymentMethod}</TextLabel></View>
             </Card>
             <ActionButton title={t('transactionHistory')} onPress={() => { setShowPaymentConfirmation(false); setScreen('history'); }} fontFamily={font} />
@@ -1043,7 +1043,7 @@ export default function App() {
               <View>
                 {customerBills.filter((bill) => bill.status === 'PAID').map((bill) => renderBreakdown(bill))}
                 {customerBills.every((bill) => bill.status !== 'PAID') && payments.length === 0 ? <Card><TextLabel style={styles.helperText}>No paid bills yet.</TextLabel></Card> : null}
-                {payments.map((payment) => <Card key={payment.id}><View style={styles.rowBetween}><TextLabel bold>{payment.date} water bill</TextLabel><TextLabel style={styles.paidPill}>{t('paid')}</TextLabel></View><TextLabel style={styles.helperText}>{payment.id} · {payment.method}</TextLabel><View style={styles.rowBetween}><TextLabel>{t('totalPayable')}</TextLabel><TextLabel bold>৳{payment.amount.toLocaleString()}</TextLabel></View></Card>)}
+                {payments.map((payment) => <Card key={payment.id}><View style={styles.rowBetween}><TextLabel bold>{payment.date} water bill</TextLabel><TextLabel style={styles.paidPill}>{t('paid')}</TextLabel></View><TextLabel style={styles.helperText}>{payment.id} · {payment.method}</TextLabel><View style={styles.rowBetween}><TextLabel>{t('totalPayable')}</TextLabel><TextLabel bold>{formatTaka(payment.amount)}</TextLabel></View></Card>)}
                 <ActionButton title={t('paymentHistory')} onPress={() => setScreen('history')} secondary fontFamily={font} />
               </View>
             ) : billIsPaid || !latestBill ? (
@@ -1063,7 +1063,7 @@ export default function App() {
                   </View>
                   <Field label={t('paymentNumber')} value={paymentPhone} onChangeText={setPaymentPhone} keyboardType="phone-pad" />
                   <TextLabel style={styles.helperText}>{language === 'bn' ? 'ডেমো চেকআউট — কোনো প্রকৃত পেমেন্ট নেওয়া হবে না।' : 'Demo checkout — no real payment will be charged.'}</TextLabel>
-                  <ActionButton title={`${t('confirmPayment')} · ৳${currentBillAmount.toLocaleString()}`} onPress={completePayment} fontFamily={font} />
+                  <ActionButton title={`${t('confirmPayment')} · ${formatTaka(currentBillAmount)}`} onPress={completePayment} fontFamily={font} />
                 </Card>
               </>
             )}
@@ -1084,7 +1084,7 @@ export default function App() {
                 <View style={styles.historyDetails}>
                   <View style={styles.rowBetween}><TextLabel bold>{payment.date} water bill</TextLabel><TextLabel style={styles.paidPill}>{t('paid')}</TextLabel></View>
                   <TextLabel style={styles.helperText}>{displayAccountNo} · {payment.id}</TextLabel>
-                  <View style={styles.rowBetween}><TextLabel style={styles.helperText}>{payment.method}</TextLabel><TextLabel bold>৳{payment.amount.toLocaleString()}</TextLabel></View>
+                  <View style={styles.rowBetween}><TextLabel style={styles.helperText}>{payment.method}</TextLabel><TextLabel bold>{formatTaka(payment.amount)}</TextLabel></View>
                   <LinkAction title="View receipt" onPress={() => showNotice(`${t('paymentReference')}: ${payment.id}`)} />
                 </View>
               </Card>
