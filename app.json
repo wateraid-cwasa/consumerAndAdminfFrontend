@@ -31,7 +31,10 @@
     },
     "plugins": [
       "expo-camera",
-      "expo-location"
+      "expo-location",
+      "expo-font",
+      "expo-secure-store",
+      "expo-status-bar"
     ]
   }
 }

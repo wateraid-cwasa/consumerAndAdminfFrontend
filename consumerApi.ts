@@ -1,3 +1,5 @@
+import axios, { AxiosError, type AxiosRequestConfig } from 'axios';
+import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 export const API_BASE_URL =
@@ -58,44 +60,74 @@ export type BillDetail = {
   surcharges: SurchargeStep[];
 };
 
-const webMemoryStorage = new Map<string, string>();
+// Where tokens live:
+// - Android and iOS: expo-secure-store (Keychain / Keystore), mirrored in memory for fast reads.
+// - Web: browser localStorage (the browser has no secure store), with an in-memory fallback.
+const memoryStorage = new Map<string, string>();
+const isWeb = Platform.OS === 'web';
 
 function canUseStorage(): boolean {
-  return Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+  return isWeb && typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
 
 function setItem(key: string, value: string): void {
-  if (!canUseStorage()) {
-    webMemoryStorage.set(key, value);
+  memoryStorage.set(key, value);
+  if (!isWeb) {
+    SecureStore.setItemAsync(key, value).catch(() => {
+      // Keep the in-memory copy if the secure store is unavailable.
+    });
     return;
   }
+  if (!canUseStorage()) return;
   try {
     window.localStorage.setItem(key, value);
   } catch {
-    webMemoryStorage.set(key, value);
+    // Keep the in-memory copy.
   }
 }
 
 function getItem(key: string): string | null {
-  if (!canUseStorage()) return webMemoryStorage.get(key) ?? null;
+  const cached = memoryStorage.get(key);
+  if (cached !== undefined) return cached;
+  if (!canUseStorage()) return null;
   try {
     return window.localStorage.getItem(key);
   } catch {
-    return webMemoryStorage.get(key) ?? null;
+    return null;
   }
 }
 
 function removeItems(keys: readonly string[]): void {
   for (const key of keys) {
-    if (canUseStorage()) {
+    memoryStorage.delete(key);
+    if (!isWeb) {
+      SecureStore.deleteItemAsync(key).catch(() => {
+        // ignore
+      });
+    } else if (canUseStorage()) {
       try {
         window.localStorage.removeItem(key);
       } catch {
         // ignore
       }
     }
-    webMemoryStorage.delete(key);
   }
+}
+
+// Call once at start-up on Android and iOS. It loads the saved token and session from the
+// secure store so the customer stays signed in. On web the values are read synchronously already.
+export async function restoreCustomerSession(): Promise<CustomerSession | null> {
+  if (!isWeb) {
+    for (const key of [ACCESS_TOKEN_KEY, CUSTOMER_KEY]) {
+      try {
+        const value = await SecureStore.getItemAsync(key);
+        if (value !== null) memoryStorage.set(key, value);
+      } catch {
+        // Treat an unreadable secure store as signed out.
+      }
+    }
+  }
+  return getItem(ACCESS_TOKEN_KEY) ? getStoredCustomerSession() : null;
 }
 
 export class ApiRequestError extends Error {
@@ -141,50 +173,50 @@ export function clearCustomerSession(): void {
   removeItems([ACCESS_TOKEN_KEY, CUSTOMER_KEY]);
 }
 
+const http = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 20000,
+  headers: {
+    'Content-Type': 'application/json',
+    // Lets requests through ngrok's free-tier browser warning page during testing.
+    'ngrok-skip-browser-warning': '1',
+  },
+});
+
 async function rawRequest<T>(
   path: string,
   options: { method?: string; body?: unknown; authorized?: boolean } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    // Lets requests through ngrok's free-tier browser warning page during testing.
-    'ngrok-skip-browser-warning': '1',
+  const config: AxiosRequestConfig = {
+    url: path,
+    method: options.method ?? 'GET',
+    data: options.body,
+    headers: {},
   };
   if (options.authorized) {
     const accessToken = getItem(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new ApiRequestError(401, 'Not signed in.');
-    headers.Authorization = `Bearer ${accessToken}`;
+    config.headers = { Authorization: `Bearer ${accessToken}` };
   }
 
-  let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method: options.method ?? 'GET',
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
-  } catch {
-    throw new ApiConnectionError();
+    const response = await http.request<T>(config);
+    if (response.status === 204) return undefined as T;
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const failure = error as AxiosError;
+      if (!failure.response) throw new ApiConnectionError();
+      const data = failure.response.data;
+      const raw =
+        typeof data === 'object' && data !== null && 'message' in data
+          ? (data as { message: unknown }).message
+          : undefined;
+      const message = Array.isArray(raw) ? raw.join(', ') : raw !== undefined ? String(raw) : undefined;
+      throw new ApiRequestError(failure.response.status, message);
+    }
+    throw error;
   }
-
-  if (response.status === 204) return undefined as T;
-
-  let data: unknown = null;
-  try {
-    data = await response.json();
-  } catch {
-    // no body
-  }
-
-  if (!response.ok) {
-    const message =
-      typeof data === 'object' && data !== null && 'message' in data
-        ? String((data as { message: unknown }).message)
-        : undefined;
-    throw new ApiRequestError(response.status, message);
-  }
-
-  return data as T;
 }
 
 // The server has no token refresh endpoint, so an expired token means signing in again.

@@ -25,6 +25,7 @@ import {
   loginCustomer,
   registerCustomer,
   getStoredCustomerSession,
+  restoreCustomerSession,
   getCustomerBills,
   getCustomerProfile,
   getLastBillsNote,
@@ -86,6 +87,19 @@ function formatBillDate(value: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
+}
+
+function billMonthLabel(bill: BillDetail): string {
+  const source = bill.periodEnd ?? bill.issueDate;
+  if (!source) return 'Water bill';
+  const date = new Date(source);
+  if (Number.isNaN(date.getTime())) return 'Water bill';
+  return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(date);
+}
+
+function billSortTime(bill: BillDetail): number {
+  const time = bill.issueDate ? new Date(bill.issueDate).getTime() : 0;
+  return Number.isNaN(time) ? 0 : time;
 }
 
 function formatTaka(value: number): string {
@@ -219,6 +233,7 @@ export default function App() {
   const [largeText, setLargeText] = useState(false);
   const [smsFallback, setSmsFallback] = useState(true);
   const [billFilter, setBillFilter] = useState<'due' | 'paid'>('due');
+  const [expandedHistoryBillId, setExpandedHistoryBillId] = useState<string | null>(null);
   const [billCardShowingDetails, setBillCardShowingDetails] = useState(false);
   const [profileEditing, setProfileEditing] = useState(false);
   const [applicationStage, setApplicationStage] = useState(2);
@@ -290,6 +305,17 @@ export default function App() {
     } else if (failure) {
       showNotice('Could not load your account details. Please try again.');
     }
+  }, []);
+
+  // On Android and iOS the saved token is in the secure store, which can only be read asynchronously.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    restoreCustomerSession().then((saved) => {
+      if (saved) {
+        setCustomerSession(saved);
+        setScreen((current) => (current === 'welcome' ? 'home' : current));
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -574,15 +600,16 @@ export default function App() {
       showNotice(language === 'bn' ? 'লেনদেনের ইতিহাস প্রস্তুত।' : 'Your transaction history is ready.');
       return;
     }
-    const csv = ['Reference,Date,Amount (BDT),Method', ...payments.map((item) => `${item.id},${item.date},${item.amount},${item.method}`)].join('\n');
+    const sortedBills = [...customerBills].sort((a, b) => billSortTime(b) - billSortTime(a));
+    const csv = ['Bill No,Billing month,Issue date,Due date,Consumption (m3),Amount (BDT),Status', ...sortedBills.map((bill) => [bill.billNumber, billMonthLabel(bill), formatBillDate(bill.issueDate), formatBillDate(bill.dueDate), bill.consumption ?? '', bill.netPayable, bill.status].join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'cwasa-payment-history.csv';
+    anchor.download = 'cwasa-bill-history.csv';
     anchor.click();
     URL.revokeObjectURL(url);
-    showNotice(language === 'bn' ? 'পেমেন্টের ইতিহাস ডাউনলোড হয়েছে।' : 'Payment history downloaded.');
+    showNotice(language === 'bn' ? 'বিলের ইতিহাস ডাউনলোড হয়েছে।' : 'Bill history downloaded.');
   };
 
   const TextLabel = ({ children, style, bold = false }: { children: React.ReactNode; style?: object; bold?: boolean }) => (
@@ -1072,23 +1099,43 @@ export default function App() {
       case 'history':
         return (
           <View>
-            <Heading title={t('paymentHistory')} subtitle="Your recent water bill payments." />
+            <Heading title={t('billHistory')} subtitle="Your water bills and their payment status." />
             <Card style={styles.balanceCard}>
               <View style={styles.rowBetween}><View><TextLabel style={styles.heroEyebrow}>{t('currentBill')}</TextLabel><TextLabel bold style={styles.heroAmount}>{latestBill ? formatTaka(billIsPaid ? 0 : currentBillAmount) : '৳ -'}</TextLabel></View><ActionButton title={t('export')} onPress={exportHistory} secondary fontFamily={font} compact /></View>
               <TextLabel style={styles.heroEyebrow}>Account :  {displayAccountNo}</TextLabel>
             </Card>
-            {payments.length === 0 ? <Card><TextLabel style={styles.helperText}>No payments yet.</TextLabel></Card> : null}
-            {payments.map((payment) => (
-              <Card key={payment.id} style={styles.historyCard}>
-                <View style={styles.historyIcon}><TextLabel bold style={styles.historyCheck}>✓</TextLabel></View>
-                <View style={styles.historyDetails}>
-                  <View style={styles.rowBetween}><TextLabel bold>{payment.date} water bill</TextLabel><TextLabel style={styles.paidPill}>{t('paid')}</TextLabel></View>
-                  <TextLabel style={styles.helperText}>{displayAccountNo} · {payment.id}</TextLabel>
-                  <View style={styles.rowBetween}><TextLabel style={styles.helperText}>{payment.method}</TextLabel><TextLabel bold>{formatTaka(payment.amount)}</TextLabel></View>
-                  <LinkAction title="View receipt" onPress={() => showNotice(`${t('paymentReference')}: ${payment.id}`)} />
+            {customerBills.length === 0 ? <Card><TextLabel style={styles.helperText}>No bills yet.</TextLabel></Card> : null}
+            {[...customerBills].sort((a, b) => billSortTime(b) - billSortTime(a)).map((bill) => {
+              const paid = bill.status === 'PAID';
+              const overdue = isPastDue(bill);
+              const expanded = expandedHistoryBillId === bill.id;
+              return (
+                <View key={bill.id}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${billMonthLabel(bill)} bill, ${expanded ? 'hide' : 'show'} details`}
+                    onPress={() => setExpandedHistoryBillId(expanded ? null : bill.id)}
+                  >
+                    <Card style={styles.historyCard}>
+                      <View style={styles.historyIcon}><TextLabel bold style={styles.historyCheck}>{paid ? '✓' : '৳'}</TextLabel></View>
+                      <View style={styles.historyDetails}>
+                        <View style={styles.rowBetween}>
+                          <TextLabel bold>{billMonthLabel(bill)} water bill</TextLabel>
+                          <TextLabel style={paid ? styles.paidPill : styles.statusPill}>{paid ? t('paid') : overdue ? 'Overdue' : t('pending')}</TextLabel>
+                        </View>
+                        <TextLabel style={styles.helperText}>{bill.billNumber || '-'} · Issued {formatBillDate(bill.issueDate)}</TextLabel>
+                        <View style={styles.rowBetween}>
+                          <TextLabel style={styles.helperText}>{paid ? 'Paid' : `Due ${formatBillDate(bill.dueDate)}`}</TextLabel>
+                          <TextLabel bold>{formatTaka(paid ? bill.netPayable : amountPayableToday(bill))}</TextLabel>
+                        </View>
+                        <TextLabel style={styles.helperText}>{expanded ? 'Hide details ▲' : 'View details ▼'}</TextLabel>
+                      </View>
+                    </Card>
+                  </Pressable>
+                  {expanded ? renderBreakdown(bill) : null}
                 </View>
-              </Card>
-            ))}
+              );
+            })}
           </View>
         );
       // case 'new-connection':
