@@ -1,6 +1,16 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import {
+  asRecord,
+  normaliseBill,
+  pickString,
+  pickText,
+  unwrapList,
+  type BillDetail,
+} from './billLogic';
+
+export type { BillDetail, SurchargeStep } from './billLogic';
 
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ??
@@ -23,41 +33,6 @@ export type CustomerProfile = {
   wardNo: string | null;
   propertyType: string | null;
   connectionSize: string | null;
-};
-
-export type SurchargeStep = {
-  deadline: string;
-  percentage: number;
-  surchargeAmount: number;
-  totalPayable: number;
-};
-
-export type BillDetail = {
-  id: string;
-  billNumber: string;
-  status: string;
-  issueDate: string | null;
-  dueDate: string | null;
-  periodStart: string | null;
-  periodEnd: string | null;
-  previousReading: number | null;
-  currentReading: number | null;
-  consumption: number | null;
-  isMinimumBilled: boolean;
-  meterNo: string | null;
-  holderName: string | null;
-  address: string | null;
-  wardNo: string | null;
-  contactNo: string | null;
-  additionalCharge: number;
-  ratePerM3: number | null;
-  waterCharge: number;
-  vatPercentage: number | null;
-  vatAmount: number;
-  arrears: number;
-  adjustments: number;
-  netPayable: number;
-  surcharges: SurchargeStep[];
 };
 
 // Where tokens live:
@@ -234,52 +209,6 @@ async function authorizedRequest<T>(
   }
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function pickString(source: unknown, keys: readonly string[]): string | null {
-  const record = asRecord(source);
-  if (!record) return null;
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string' && value) return value;
-  }
-  return null;
-}
-
-// Decimal columns can arrive as numbers or strings, depending on how the API serialises them.
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function firstNumber(source: Record<string, unknown> | null, keys: readonly string[]): number | null {
-  if (!source) return null;
-  for (const key of keys) {
-    const parsed = toNumber(source[key]);
-    if (parsed !== null) return parsed;
-  }
-  return null;
-}
-
-function pickText(source: unknown, keys: readonly string[]): string | null {
-  const record = asRecord(source);
-  if (!record) return null;
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  }
-  return null;
-}
-
 function normaliseProfile(raw: unknown): CustomerProfile {
   const outer = asRecord(raw);
   const profile = asRecord(outer?.customer) ?? asRecord(outer?.data) ?? outer;
@@ -293,97 +222,6 @@ function normaliseProfile(raw: unknown): CustomerProfile {
     propertyType: pickText(profile, ['propertyType', 'category']),
     connectionSize: pickText(profile, ['connectionSize', 'connectionSizeInch']),
   };
-}
-
-function monthRange(month: number | null, year: number | null): { start: string | null; end: string | null } {
-  if (month === null || year === null || month < 1 || month > 12) return { start: null, end: null };
-  const pad = (value: number) => String(value).padStart(2, '0');
-  const lastDay = new Date(year, month, 0).getDate();
-  return { start: `${year}-${pad(month)}-01`, end: `${year}-${pad(month)}-${pad(lastDay)}` };
-}
-
-function normaliseBill(raw: unknown): BillDetail | null {
-  const bill = asRecord(raw);
-  if (!bill) return null;
-  const reading = asRecord(bill.meterReading);
-  const tariff = asRecord(bill.tariff);
-  const vatRate = asRecord(bill.vatRate);
-
-  const baseCharge = firstNumber(bill, ['baseWaterCharge', 'waterCharge', 'amount']);
-  const additionalCharge = firstNumber(bill, ['additionalWaterCharge']) ?? 0;
-  const vatRaw = firstNumber(bill, ['vatAmount', 'vat']) ?? 0;
-  const netPayable =
-    firstNumber(bill, ['totalAmountDue', 'netPayable', 'totalPayable', 'totalAmount', 'billTotal', 'payable']) ??
-    (baseCharge !== null ? baseCharge + additionalCharge + vatRaw : null);
-  if (netPayable === null) return null;
-  const waterCharge = baseCharge ?? netPayable - additionalCharge - vatRaw;
-  // Anything in the total that is not water charge or VAT (arrears, adjustments) is shown as one line.
-  const explicitExtras = (firstNumber(bill, ['previousArrears', 'arrears']) ?? 0) + (firstNumber(bill, ['adjustments']) ?? 0);
-  const otherCharges = explicitExtras !== 0 ? explicitExtras : Math.round((netPayable - (waterCharge + additionalCharge + vatRaw)) * 100) / 100;
-
-  const surcharges: SurchargeStep[] = [];
-  const rawSteps = Array.isArray(bill.surchargeTiers) ? bill.surchargeTiers : [];
-  for (const step of rawSteps) {
-    const record = asRecord(step);
-    if (!record) continue;
-    const deadline = pickString(record, ['deadline']);
-    const percentage = firstNumber(record, ['percentage']);
-    const surchargeAmount = firstNumber(record, ['surchargeAmount']);
-    const totalPayable = firstNumber(record, ['totalPayable']);
-    if (deadline && percentage !== null && surchargeAmount !== null && totalPayable !== null) {
-      surcharges.push({ deadline, percentage, surchargeAmount, totalPayable });
-    }
-  }
-  surcharges.sort((a, b) => a.deadline.localeCompare(b.deadline));
-
-  const period = monthRange(firstNumber(bill, ['billingMonth']), firstNumber(bill, ['billingYear']));
-  const paymentStatus = (pickString(bill, ['paymentStatus']) ?? '').toUpperCase();
-  const billStatus = pickString(bill, ['billStatus', 'status']) ?? 'ISSUED';
-  const line1 = pickString(bill, ['accountAddressLine1']);
-  const line2 = pickString(bill, ['accountAddressLine2']);
-
-  return {
-    id: pickString(bill, ['id']) ?? pickString(bill, ['billNo', 'billNumber']) ?? String(Math.random()),
-    billNumber: pickString(bill, ['billNo', 'billNumber']) ?? '',
-    status: paymentStatus === 'PAID' ? 'PAID' : billStatus.toUpperCase(),
-    issueDate: pickString(bill, ['issueDate']),
-    dueDate: pickString(bill, ['dueDate']),
-    periodStart: pickString(bill, ['billingPeriodStart']) ?? period.start,
-    periodEnd: pickString(bill, ['billingPeriodEnd']) ?? period.end,
-    previousReading: firstNumber(bill, ['previousMeterReadingValue', 'previousReading']) ?? firstNumber(reading, ['previousReading']),
-    currentReading: firstNumber(bill, ['currentMeterReadingValue', 'currentReading']) ?? firstNumber(reading, ['currentReading']),
-    consumption: firstNumber(bill, ['billableConsumptionM3', 'consumptionM3', 'consumption']),
-    isMinimumBilled: bill.isMinimumBilled === true,
-    meterNo: pickString(bill, ['meterNo']) ?? pickString(reading, ['meterNo']),
-    holderName: pickString(bill, ['accountHolderName']),
-    address: [line1, line2].filter(Boolean).join(', ') || null,
-    wardNo: pickText(bill, ['accountWardNo']),
-    contactNo: pickText(bill, ['accountContactNo']),
-    additionalCharge,
-    ratePerM3: firstNumber(bill, ['tariffRatePerM3']) ?? firstNumber(tariff, ['ratePerM3']),
-    waterCharge,
-    vatPercentage: firstNumber(bill, ['vatRatePercentage']) ?? firstNumber(vatRate, ['percentage']),
-    vatAmount: vatRaw,
-    arrears: otherCharges,
-    adjustments: 0,
-    netPayable,
-    surcharges,
-  };
-}
-
-// Response shapes are not documented in Swagger yet, so accept the common layouts.
-function unwrapList(data: unknown, depth = 0): unknown[] {
-  if (Array.isArray(data)) return data;
-  const record = asRecord(data);
-  if (record && depth < 3) {
-    for (const key of ['data', 'items', 'bills', 'results', 'records']) {
-      if (record[key] !== undefined) {
-        const found = unwrapList(record[key], depth + 1);
-        if (found.length > 0) return found;
-      }
-    }
-  }
-  return [];
 }
 
 // Explains why no bill could be shown, so the app can tell the customer (and the developer) why.

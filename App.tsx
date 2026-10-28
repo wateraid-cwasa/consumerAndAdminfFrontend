@@ -16,6 +16,15 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
+import {
+  amountPayableToday,
+  billMonthLabel,
+  billSortTime,
+  formatBillDate,
+  formatTaka,
+  isPastDue,
+  startOfDay,
+} from './billLogic';
 import { colors, fontFamilyForText, openSansRegular, sharedStyles } from './theme';
 import styles from './styles';
 import { Language, TranslationKey, translate } from './translation';
@@ -80,49 +89,6 @@ function useStableComponent<P>(impl: (props: P) => React.ReactElement): (props: 
   const ref = useRef(impl);
   ref.current = impl;
   return useMemo(() => (props: P) => ref.current(props), []);
-}
-
-function formatBillDate(value: string | null): string {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '-';
-  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
-}
-
-function billMonthLabel(bill: BillDetail): string {
-  const source = bill.periodEnd ?? bill.issueDate;
-  if (!source) return 'Water bill';
-  const date = new Date(source);
-  if (Number.isNaN(date.getTime())) return 'Water bill';
-  return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(date);
-}
-
-function billSortTime(bill: BillDetail): number {
-  const time = bill.issueDate ? new Date(bill.issueDate).getTime() : 0;
-  return Number.isNaN(time) ? 0 : time;
-}
-
-function formatTaka(value: number): string {
-  return `৳${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function startOfDay(value: Date): number {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-}
-
-function isPastDue(bill: BillDetail, now = new Date()): boolean {
-  if (!bill.dueDate || bill.status === 'PAID') return false;
-  const due = new Date(bill.dueDate);
-  return !Number.isNaN(due.getTime()) && startOfDay(now) > startOfDay(due);
-}
-
-// The amount to pay today: net payable up to the due date, then the matching late-payment step.
-function amountPayableToday(bill: BillDetail, now = new Date()): number {
-  if (!isPastDue(bill, now) || bill.surcharges.length === 0) return bill.netPayable;
-  const today = startOfDay(now);
-  const step = bill.surcharges.find((item) => startOfDay(new Date(item.deadline)) >= today)
-    ?? bill.surcharges[bill.surcharges.length - 1];
-  return step.totalPayable;
 }
 
 function ActionButton({

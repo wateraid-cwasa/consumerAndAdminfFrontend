@@ -1,0 +1,13 @@
+{
+  "id": "cwasa-example",
+  "name": "CWASA test server",
+  "values": [
+    { "key": "baseUrl", "value": "https://YOUR-TEST-SERVER/api/v1", "enabled": true },
+    { "key": "accountNo", "value": "YOUR-TEST-ACCOUNT-NO", "enabled": true },
+    { "key": "password", "value": "PUT-TEST-PASSWORD-HERE", "type": "secret", "enabled": true },
+    { "key": "billMonth", "value": "10", "enabled": true },
+    { "key": "billYear", "value": "2026", "enabled": true },
+    { "key": "maxResponseMs", "value": "10000", "enabled": true }
+  ],
+  "_postman_variable_scope": "environment"
+}

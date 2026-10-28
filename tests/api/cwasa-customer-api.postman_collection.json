@@ -1,0 +1,504 @@
+{
+  "info": {
+    "name": "CWASA Customer API",
+    "description": "Black-box checks for the customer API used by the Consumer APP. Run: npm run test:api (after creating tests/api/environment.local.json from environment.example.json).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Login with valid account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 or 201', () => pm.expect([200,201]).to.include(pm.response.code));",
+                  "const body = pm.response.json();",
+                  "const token = (body.tokens && body.tokens.accessToken) || body.accessToken || body.access_token || body.token;",
+                  "pm.test('Response contains an access token', () => pm.expect(token, 'access token').to.be.a('string').and.not.empty);",
+                  "pm.test('Token looks like a JWT (3 parts)', () => pm.expect(String(token).split('.')).to.have.lengthOf(3));",
+                  "pm.test('Response time is within the limit', () => pm.expect(pm.response.responseTime).to.be.below(Number(pm.environment.get('maxResponseMs') || 10000)));",
+                  "pm.collectionVariables.set('accessToken', token);",
+                  "try { const payload = JSON.parse(require('atob')(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); pm.test('Token role is CUSTOMER', () => pm.expect(payload.role).to.eql('CUSTOMER')); pm.test('Token has an expiry in the future', () => pm.expect(payload.exp * 1000).to.be.above(Date.now())); } catch (e) { pm.test('Token payload can be read', () => pm.expect.fail(String(e))); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customer/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNo\": \"{{accountNo}}\",\n  \"password\": \"{{password}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login with wrong password is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 or 401', () => pm.expect([400,401]).to.include(pm.response.code));",
+                  "pm.test('No token is returned', () => { const text = pm.response.text(); pm.expect(text).to.not.match(/eyJ[A-Za-z0-9_-]+\\./); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customer/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNo\": \"{{accountNo}}\",\n  \"password\": \"definitely-wrong-password-123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login with unknown account is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400, 401 or 404', () => pm.expect([400,401,404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customer/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNo\": \"NO-SUCH-ACCOUNT\",\n  \"password\": \"whatever123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login with empty body is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 or 401', () => pm.expect([400,401,422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customer/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Profile",
+      "item": [
+        {
+          "name": "Get my profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const profile = body.customer || body.data || body;",
+                  "pm.test('Profile belongs to the signed-in account', () => pm.expect(String(profile.accountNo || profile.accountNumber)).to.eql(pm.environment.get('accountNo')));",
+                  "pm.test('Profile does not leak a password or hash', () => pm.expect(pm.response.text().toLowerCase()).to.not.include('passwordhash'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/customer/me"
+          }
+        },
+        {
+          "name": "Profile without a token is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customer/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Bills",
+      "item": [
+        {
+          "name": "Bills without a token are refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/bill/customer"
+          }
+        },
+        {
+          "name": "Bills with a bad token are refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer not.a.token"
+              }
+            ],
+            "url": "{{baseUrl}}/bill/customer"
+          }
+        },
+        {
+          "name": "Get my bills",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has a bills array and hasNextPage flag', () => { pm.expect(body.bills).to.be.an('array'); pm.expect(body.hasNextPage).to.be.a('boolean'); });",
+                  "pm.test('Returns no more than the limit', () => pm.expect(body.bills.length).to.be.at.most(10));",
+                  "const money = (v) => Number(v);",
+                  "const near = (a, b) => Math.abs(a - b) < 0.011;",
+                  "pm.test('Every bill belongs to this account', () => body.bills.forEach(b => pm.expect(b.accountNo).to.eql(pm.environment.get('accountNo'))));",
+                  "pm.test('Every bill has the fields the app reads', () => body.bills.forEach(b => { ['id','billNo','totalAmountDue','baseWaterCharge','vatAmount','dueDate','issueDate','billStatus','paymentStatus','billingMonth','billingYear'].forEach(k => pm.expect(b, 'bill ' + b.billNo + ' missing ' + k).to.have.property(k)); }));",
+                  "pm.test('Amounts are valid numbers', () => body.bills.forEach(b => ['totalAmountDue','baseWaterCharge','vatAmount'].forEach(k => pm.expect(Number.isFinite(money(b[k])), b.billNo + ' ' + k).to.be.true)));",
+                  "pm.test('Total = water charge + extra charge + VAT', () => body.bills.forEach(b => pm.expect(near(money(b.baseWaterCharge) + money(b.additionalWaterCharge || 0) + money(b.vatAmount), money(b.totalAmountDue)), b.billNo + ' total mismatch').to.be.true));",
+                  "pm.test('VAT matches the VAT rate (unless exempt)', () => body.bills.forEach(b => { if (b.isVatExempt) return pm.expect(money(b.vatAmount)).to.eql(0); const expected = (money(b.baseWaterCharge) + money(b.additionalWaterCharge || 0)) * money(b.vatRatePercentage) / 100; pm.expect(near(expected, money(b.vatAmount)), b.billNo + ' VAT mismatch').to.be.true; }));",
+                  "pm.test('Due date is after the issue date', () => body.bills.forEach(b => pm.expect(new Date(b.dueDate).getTime(), b.billNo).to.be.above(new Date(b.issueDate).getTime())));",
+                  "pm.test('Surcharge total = bill total + surcharge amount', () => body.bills.forEach(b => (b.surcharges || []).forEach(s => pm.expect(near(money(b.totalAmountDue) + money(s.surchargeAmount), money(s.totalPayable)), b.billNo + ' surcharge ' + s.daysAfterDue).to.be.true)));",
+                  "pm.test('Surcharge steps grow with time', () => body.bills.forEach(b => { const s = b.surcharges || []; for (let i = 1; i < s.length; i++) { pm.expect(s[i].daysAfterDue).to.be.above(s[i-1].daysAfterDue); pm.expect(money(s[i].surchargePercentage)).to.be.above(money(s[i-1].surchargePercentage)); } }));",
+                  "pm.test('Bill numbers are unique', () => { const nums = body.bills.map(b => b.billNo); pm.expect(new Set(nums).size).to.eql(nums.length); });",
+                  "pm.test('Response time is within the limit', () => pm.expect(pm.response.responseTime).to.be.below(Number(pm.environment.get('maxResponseMs') || 10000)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/bill/customer?limit=10"
+          }
+        },
+        {
+          "name": "Filter my bills by month and year",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Only bills for the chosen month and year are returned', () => body.bills.forEach(b => { pm.expect(b.billingMonth).to.eql(Number(pm.environment.get('billMonth'))); pm.expect(b.billingYear).to.eql(Number(pm.environment.get('billYear'))); }));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/bill/customer?month={{billMonth}}&year={{billYear}}&limit=10"
+          }
+        },
+        {
+          "name": "Invalid month is handled safely",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 or returns an empty list (never a server error)', () => { if (pm.response.code === 200) { pm.expect(pm.response.json().bills).to.be.an('array').that.is.empty; } else { pm.expect([400,422]).to.include(pm.response.code); } });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/bill/customer?month=13"
+          }
+        },
+        {
+          "name": "Paging: first page (limit 2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Returns at most 2 bills', () => pm.expect(body.bills.length).to.be.at.most(2));",
+                  "pm.collectionVariables.set('page1Ids', JSON.stringify(body.bills.map(b => b.id)));",
+                  "pm.collectionVariables.set('lastBillId', body.bills.length ? body.bills[body.bills.length - 1].id : '');",
+                  "pm.collectionVariables.set('hasNextPage', String(body.hasNextPage));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/bill/customer?limit=2&sortBy=createdAt&sortOrder=desc"
+          }
+        },
+        {
+          "name": "Paging: next page using cursorId",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('hasNextPage') !== 'true') { pm.test('Only one page of bills, so paging is not needed', () => pm.expect(true).to.be.true); return; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const first = JSON.parse(pm.collectionVariables.get('page1Ids'));",
+                  "pm.test('Second page does not repeat bills from the first page', () => body.bills.forEach(b => pm.expect(first).to.not.include(b.id)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "ngrok-skip-browser-warning",
+                "value": "1"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/bill/customer?limit=2&sortBy=createdAt&sortOrder=desc&cursorId={{lastBillId}}"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "page1Ids",
+      "value": "[]"
+    },
+    {
+      "key": "lastBillId",
+      "value": ""
+    },
+    {
+      "key": "hasNextPage",
+      "value": "false"
+    }
+  ]
+}

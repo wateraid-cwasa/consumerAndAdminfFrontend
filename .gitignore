@@ -3,3 +3,6 @@ dist/
 .expo/
 web-build/
 npm-debug.log*
+
+# API test credentials
+tests/api/environment.local.json

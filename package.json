@@ -8,7 +8,10 @@
     "web": "expo start --web",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:api": "npx --yes newman@6 run tests/api/cwasa-customer-api.postman_collection.json -e tests/api/environment.local.json"
   },
   "dependencies": {
     "axios": "^1.21.0",
@@ -25,6 +28,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
   }
 }
